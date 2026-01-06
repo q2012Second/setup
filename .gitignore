@@ -1,0 +1,29 @@
+# Ignore everything by default
+*
+
+# Allow Claude Code setup files
+!.gitignore
+!README.md
+
+# Root-level Claude configuration
+!CLAUDE.md
+!AGENTS.md
+
+# Claude commands directory
+!.claude/
+!.claude/commands/
+!.claude/commands/*.md
+
+# Project-specific CLAUDE.md files (copied to avoid submodule issues)
+!projects/
+!projects/cost-module/
+!projects/cost-module/CLAUDE.md
+!projects/easy-returns-service/
+!projects/easy-returns-service/CLAUDE.md
+
+# Exclude local/personal settings and system files
+.claude/settings.local.json
+.claude/.DS_Store
+.claude/commands/.DS_Store
+**/.DS_Store
+**/settings.local.json
