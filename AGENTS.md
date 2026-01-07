@@ -93,11 +93,135 @@ Subagent context is isolated:
 | Find relevant files | Subagent (Explore) | Exploration reads stay isolated |
 | Read & understand code | Subagent (Context-Loader) | Only trimmed excerpts return |
 | Create plan | Subagent (Planner) | Receives context via prompt, not main agent reads |
+| **Revise plan** | **Subagent (Planner)** | Previous versions discarded; only final returns |
 | Review code | Subagent (Code-Reviewer) | Only issues list returns |
 | Simplify code | Subagent (Code-Simplifier) | Only suggestions return |
 | Verify solution | Subagent (Code-Goal) | Only verdict returns |
+| **Analyze logs** | **Subagent (Log-Analyzer)** | Logs can be huge; only findings return |
+| **Run tests/linters** | **Subagent (Validator)** | Output can be verbose; only verdict returns |
 | **Edit files** | **Main agent** | Must read to know line numbers |
 | **Show user a file** | **Main agent** | User explicitly requested |
+| **Reload after user changes** | **Main agent** | Re-read to get current version; mark old as stale |
+
+### CRITICAL: Log Analysis Delegation
+
+**NEVER read logs directly in main agent context.** Logs can be thousands of lines and will consume context rapidly.
+
+When logs need to be analyzed (any of these scenarios):
+- User provides a log file
+- Debugging an error during implementation
+- Verifying behavior after manual testing
+- Investigating a bug or issue
+
+**Always delegate to Log-Analyzer subagent:**
+```
+Main agent: "Let me analyze those logs"
+→ Spawn Log-Analyzer subagent with log source
+→ Receive: Summary report with findings (NOT raw logs)
+```
+
+The subagent:
+- Reads and parses all log content (stays in its isolated context)
+- Returns only: summary, findings, timeline, recommendations
+- Cross-references codebase to add file:line references
+
+### CRITICAL: Validation Delegation
+
+**NEVER run tests/linters directly in main agent context.** Test output can be hundreds of lines and will consume context rapidly.
+
+When validation is needed (any of these scenarios):
+- Pre-implementation baseline check
+- After implementing a batch of changes
+- Final verification before completing task
+
+**Always delegate to Validator subagent:**
+```
+Main agent: "Let me run the tests"
+→ Spawn Validator subagent with validation type and file list
+→ Receive: Pass/fail verdict with failure summaries (NOT raw output)
+```
+
+The subagent:
+- Runs all validation commands (stays in its isolated context)
+- Parses verbose output for failures
+- Returns only: verdict, failure summaries, infrastructure fix suggestions
+- Does NOT suggest business logic fixes (lacks task context)
+
+### CRITICAL: Plan Revision Delegation
+
+**NEVER revise plans directly in main agent context.** Plan iterations accumulate and waste context.
+
+When user requests plan changes (any of these scenarios):
+- "Change X in the plan"
+- "Add requirement Y"
+- "Use approach Z instead"
+- Any feedback that modifies the plan
+
+**Always delegate to Planner subagent:**
+```
+Main agent: "User wants to change X"
+→ Spawn Planner subagent with: current plan + user feedback + problem statement
+→ Planner revises, updates Design Decisions section
+→ Spawn Plan-Reviewer to validate changes
+→ Receive: Updated plan (NOT previous versions)
+→ Overwrite plan.md
+```
+
+The subagent:
+- Receives current plan and user feedback
+- Revises implementation steps
+- Updates Design Decisions with rationale
+- Returns only the final updated plan
+- Previous iterations stay in subagent context (discarded)
+
+**Result:** Main agent has only final plan with embedded rationale.
+
+### CRITICAL: User Code Changes Handling
+
+**When user notifies "I made changes" during a workflow:**
+
+User may not provide a complete list of changed files. Always detect changes yourself.
+
+**Flow:**
+```
+User: "I made some changes" / "I edited the code" / "I fixed X"
+         ↓
+Main Agent:
+  1. Detect changed files: `git diff --name-only`
+  2. Mark ALL previous reads of those files as STALE
+  3. Re-read changed files to get CURRENT version
+  4. Quick review of user's changes (lightweight, not full Code-Reviewer):
+     - Obvious bugs? Syntax errors? Broken imports?
+     - Inconsistency with existing plan?
+     - If issue spotted → ASK user before fixing
+  5. Continue workflow with current code in context
+```
+
+**Context Rules for User Changes:**
+- Previous reads of modified files: **STALE - ignore**
+- Always trust `git diff` over user's list (may be incomplete)
+- Current reads: **Source of truth**
+- User made changes for a reason - respect intent
+- But user may make errors - validate and notify
+
+**Lightweight Review Checks:**
+- Syntax errors (obvious typos, missing brackets)
+- Import errors (missing/wrong imports)
+- Type mismatches (if obvious)
+- Breaks existing tests (if clearly visible)
+- Inconsistent with plan (if significantly deviates)
+
+**If Issue Spotted:**
+```
+"I noticed [issue] in your changes to [file].
+You changed [X] but this might [cause Y].
+Was this intentional, or should I fix it?"
+```
+
+**Do NOT:**
+- Silently "fix" user's changes
+- Assume user made a mistake without asking
+- Keep stale code versions as source of truth
 
 ### Per-Phase Context Rules
 
@@ -107,11 +231,15 @@ Subagent context is isolated:
 | 2. Context Gathering | NO | YES (Explore) |
 | 2.5. Context Loading | NO | YES (Context-Loader) |
 | 3. Planning | NO | YES (Planner) |
-| 3.5. Pre-Implementation | NO | NO (validation only) |
-| 4. Implementation | YES (only files being edited) | NO |
+| 3.5. Pre-Implementation | NO | YES (Validator runs commands) |
+| 4. Implementation | YES (only files being edited) | YES (Validator for batches) |
 | 5. Code Quality | NO | YES (Simplifier, Reviewer) |
-| 6. Verification | NO | YES (Code-Goal) |
+| 6. Verification | NO | YES (Code-Goal, Validator) |
 | 7. Final Review | NO (use git diff) | NO |
+| **Plan Revision (Phase 3)** | **NO** | **YES (Planner)** |
+| **Log Analysis (any phase)** | **NO** | **YES (Log-Analyzer)** |
+| **Validation (any phase)** | **NO** | **YES (Validator)** |
+| **User Changes (any phase)** | **YES (re-read changed)** | **NO** |
 
 ### How to Pass Context Between Phases
 
@@ -309,6 +437,22 @@ This phase uses a fresh subagent that:
 ### Overview
 [Brief description of what will be implemented]
 
+### Design Decisions
+[Accumulates through revisions - captures rationale for current approach]
+
+| Decision | Rationale |
+|----------|-----------|
+| [Choice made] | [Why this approach was chosen] |
+| [User requirement] | [How it's addressed] |
+
+**User Requirements:**
+- [Explicit user request 1]
+- [Explicit user request 2]
+
+**Alternative Approaches Considered:**
+- [Alternative 1]: [Why not chosen]
+- [Alternative 2]: [Why not chosen]
+
 ### Prerequisites
 - [Any setup or preparation needed]
 
@@ -341,6 +485,56 @@ This phase uses a fresh subagent that:
   **Mitigation:** [How to address it]
 ```
 
+### Plan Revision Flow
+
+**When user requests changes to a plan, ALWAYS delegate to Planner subagent.**
+
+This keeps main agent context clean - only the final approved plan remains.
+
+```
+User: "Change X in the plan" / "Add requirement Y" / "Use approach Z instead"
+         ↓
+Main Agent: Does NOT revise plan directly
+         ↓
+Spawns Planner subagent (Task tool, model=opus) with:
+  - Current plan (from plan.md)
+  - User's feedback/new requirements
+  - Original problem statement
+  - Trimmed context (if significant architectural change)
+         ↓
+Planner: Revises plan
+  - Updates Implementation Steps as needed
+  - Adds to Design Decisions section:
+    - New user requirement
+    - Rationale for change
+    - Alternatives considered (if applicable)
+         ↓
+Spawns Plan-Reviewer subagent (Task tool, model=opus)
+         ↓
+Returns: Updated plan with Design Decisions updated
+         ↓
+Main Agent: Overwrites plan.md with new version
+         ↓
+Present to user for approval (repeat if more changes requested)
+```
+
+**Context Management for Revisions:**
+- Main agent receives: User feedback (unavoidable) + final plan only
+- Previous plan versions: Discarded (not kept in main context)
+- Rationale for changes: Embedded in Design Decisions section of plan.md
+- Subagent context: Contains revision work, discarded after returning plan
+
+**Design Decisions Section Accumulates:**
+- User requirements (explicit requests)
+- Implementation choices and why
+- Alternatives considered and why rejected
+- Trade-offs acknowledged
+
+This ensures that after approval, main agent has clean context with only:
+1. Original task description
+2. Final problem.md
+3. Final plan.md (with all rationale embedded)
+
 ---
 
 ## Conditional Phase Skipping
@@ -371,52 +565,35 @@ User can always request full workflow regardless of classification:
 
 **Goal:** Validate that implementation can proceed without issues.
 
-**Context Rule:** Main agent does NOT read files. Only runs validation commands.
+**Context Rule:** Main agent does NOT run validation commands directly. Delegate to Validator subagent.
 
 ### When to Run:
 - Always for medium/large tasks
 - Skip for trivial/small tasks
 
-### Validation Checks:
-
-```bash
-# 1. Verify all files from plan exist
-for file in [files_from_plan]; do
-  test -f "$file" || echo "MISSING: $file"
-done
-
-# 2. Run existing tests to establish baseline
-poetry run pytest [relevant_test_files] --tb=short
-
-# 3. Check for syntax errors in target files
-poetry run python -m py_compile [files_from_plan]
-```
+### Steps:
+1. Spawn **Validator subagent** (Task tool, model=sonnet) with:
+   - Validation type: "baseline"
+   - Project info (path, CLAUDE.md location)
+   - Files from plan (for targeted validation)
+2. Receive validation report (NOT raw command output)
+3. Write to `tasks/<task-name>/baseline-validation.md`
+4. If BLOCKED: Stop and report to user
+5. If PASS/FAIL: Note baseline and continue (failures are pre-existing)
 
 **Note:** Git status is NOT checked. User manages git themselves.
 
-### Validation Output:
-```markdown
-## Pre-Implementation Validation
-
-### File Existence: [PASS/FAIL]
-- [x] path/to/file1.py exists
-- [ ] path/to/file2.py MISSING
-
-### Baseline Tests: [PASS/FAIL]
-- X tests passed, Y failed
-- [Any failures are pre-existing issues]
-
-### Syntax Check: [PASS/FAIL]
-- All files have valid syntax
-
-### Verdict: [PROCEED/BLOCKED]
-[If BLOCKED, list issues to resolve first]
-```
+### What Main Agent Receives:
+- Pass/fail verdict
+- List of pre-existing test failures (if any)
+- Infrastructure issues that might block implementation
+- NOT raw test/linter output
 
 ### On Failure:
 - If files missing: Stop, report to user
 - If tests fail: Note as baseline (not a blocker unless critical)
 - If syntax errors: Stop, report to user
+- If infrastructure issues: Apply suggested fixes or report to user
 
 ---
 
@@ -435,12 +612,12 @@ For tasks classified as **large** (5+ files), implement in batches:
 │              INCREMENTAL IMPLEMENTATION                  │
 │                                                          │
 │  ┌──────────┐   ┌──────────┐   ┌──────────┐            │
-│  │ Batch 1  │──►│ Review 1 │──►│ Batch 2  │──► ...     │
-│  │(2-3 steps)│   │(simplify)│   │(2-3 steps)│           │
+│  │ Batch 1  │──►│ Validate │──►│ Batch 2  │──► ...     │
+│  │(2-3 steps)│   │& Review  │   │(2-3 steps)│           │
 │  └──────────┘   └──────────┘   └──────────┘            │
 │       │              │              │                   │
 │       ▼              ▼              ▼                   │
-│   Run tests     Fix issues     Run tests               │
+│  (Validator)    Fix issues    (Validator)              │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -448,11 +625,14 @@ For tasks classified as **large** (5+ files), implement in batches:
 1. Group plan steps into batches of 2-3 related changes
 2. For each batch:
    - Implement the steps
-   - Run relevant tests
+   - Spawn **Validator subagent** (type: "batch") with changed files
+   - Receive pass/fail verdict (NOT raw test output)
    - Spawn Code-Simplifier for batch review
    - Fix any issues found
    - Save checkpoint (see Checkpoint section)
 3. Continue to next batch
+
+**Note:** Do NOT run tests/linters directly - delegate to Validator subagent.
 
 #### Batch Size Guidelines:
 - 2-3 steps per batch for large tasks
@@ -479,6 +659,41 @@ For tasks classified as **large** (5+ files), implement in batches:
 - Write tests as you go (if applicable)
 - **Do NOT read files "for context"** - that was done in earlier phases
 - **Large tasks**: Review after each batch, not just at the end
+
+### Handling User's Manual Code Changes
+
+When user says "I made changes" / "I edited the code" / "I fixed X" during implementation:
+
+1. **Detect changed files:**
+   ```bash
+   git diff --name-only
+   ```
+   Don't rely solely on user's list - may be incomplete.
+
+2. **Mark previous reads as STALE:**
+   Any files you read earlier that appear in git diff are now stale.
+   Do NOT trust previous versions in context.
+
+3. **Re-read changed files:**
+   Read current version to get source of truth.
+
+4. **Lightweight review of user's changes:**
+   - Obvious syntax errors?
+   - Broken imports?
+   - Inconsistent with plan?
+   - If issue spotted → **ASK before fixing**
+
+   ```
+   "I noticed [issue] in your changes to [file].
+   Was this intentional, or should I fix it?"
+   ```
+
+5. **Continue workflow with current code.**
+
+**Important:**
+- User changed code for a reason - respect intent
+- But user may make errors - validate and ask if needed
+- Never silently "fix" user's changes
 
 ---
 
@@ -533,24 +748,32 @@ For tasks classified as **large** (5+ files), implement in batches:
 
 **Goal:** Confirm the implementation solves the original problem.
 
-**Context Rule:** Main agent does NOT read files. Pass diff and problem statement to Code-Goal subagent.
+**Context Rule:** Main agent does NOT read files or run tests directly. Delegate validation to Validator, verification to Code-Goal.
 
-### Subagent Used:
+### Subagents Used:
+- **Validator** (model: sonnet) - Runs final tests/linters
 - **Code-Goal** (model: sonnet) - Verifies solution matches problem statement
 
 ### Steps:
-1. Spawn **Code-Goal subagent** (Task tool, model=sonnet) with:
+1. Spawn **Validator subagent** (Task tool, model=sonnet) with:
+   - Validation type: "final"
+   - Project info
+   - All changed files
+2. Receive validation verdict (NOT raw test output)
+3. Write to `tasks/<task-name>/final-validation.md`
+4. Spawn **Code-Goal subagent** (Task tool, model=sonnet) with:
    - Original problem statement (from `problem.md`)
    - Implementation diff (from `git diff`)
-   - Test results
-2. Receive verification verdict
-3. Run test suite via Bash
-4. Address any gaps identified
+   - Validation results summary (from step 2)
+5. Receive verification verdict
+6. Write to `tasks/<task-name>/verification.md`
+7. Address any gaps identified
 
 ### What Main Agent Receives:
+- Validation verdict with failure summaries (NOT raw output)
 - Pass/fail verdict for each acceptance criterion
 - List of gaps or concerns
-- NO file contents
+- NO file contents, NO raw test output
 
 ---
 
@@ -823,11 +1046,13 @@ You are a software analyst. Your job is to understand a user's task request by e
 
 ### Planner Subagent
 
-**Purpose:** Create detailed implementation plans from problem statements and codebase context.
+**Purpose:** Create or revise implementation plans from problem statements and codebase context.
 
 **Model:** opus (maximum thinking capability)
 
-**Prompt Template:**
+**Modes:** Creation (new plan) or Revision (update existing plan)
+
+**Prompt Template (Creation Mode):**
 ```
 You are a senior software architect creating an implementation plan.
 
@@ -849,7 +1074,47 @@ Create a detailed, step-by-step implementation plan that:
 4. Includes specific code locations and changes
 5. Defines clear testing strategy
 
-Output a complete plan in markdown format.
+Include a **Design Decisions** section that captures:
+- Key implementation choices and rationale
+- User requirements (from problem statement)
+- Alternatives considered and why rejected
+
+Output a complete plan in markdown format using the plan format from AGENTS.md.
+```
+
+**Prompt Template (Revision Mode):**
+```
+You are a senior software architect revising an implementation plan based on user feedback.
+
+## Problem Statement
+{problem_statement}
+
+## Current Plan
+{current_plan_content}
+
+## User Feedback / New Requirements
+{user_feedback}
+
+## Codebase Context (if architectural change)
+{trimmed_context_if_needed}
+
+## Your Task
+Revise the plan to address the user's feedback:
+
+1. **Update Implementation Steps** as needed
+2. **Update Design Decisions section** - ADD (do not remove previous):
+   - New user requirement: "{user_feedback summary}"
+   - Rationale for the change
+   - Alternatives considered (if applicable)
+3. Keep unaffected parts of the plan intact
+4. Ensure the revised plan is internally consistent
+
+**Important:**
+- The Design Decisions section should ACCUMULATE user requirements and rationale
+- Do not remove previous design decisions unless they're obsolete
+- Make the plan self-contained - all context needed to understand decisions should be in the plan
+
+Output the complete revised plan in markdown format.
 ```
 
 ---
@@ -1090,6 +1355,272 @@ Output your extracted context now.
 
 ---
 
+### Log-Analyzer Subagent
+
+**Purpose:** Analyze logs to detect anomalies, errors, and investigate specific problems. Supports CSV files (Datadog exports), Docker container logs, and local server logs.
+
+**Model:** sonnet (good balance of speed and analytical capability)
+
+**Modes:**
+1. **Anomaly Detection** - General scan for any issues (default)
+2. **Problem-Focused** - Targeted analysis for a specific problem
+
+**Prompt Template:**
+```
+You are a log analysis specialist. Your job is to analyze logs and identify issues, anomalies, or evidence related to specific problems.
+
+## Analysis Mode
+{mode: "anomaly" | "problem-focused"}
+
+## Problem Context (if problem-focused mode)
+{problem_description}
+
+## Log Source
+{source_type: "csv" | "docker" | "local" | "file"}
+{source_path_or_command}
+
+## Your Task
+
+### Step 1: Detect Log Format
+First, examine a sample of the logs to understand:
+- Format (CSV with columns, JSON lines, plain text, structured text)
+- Available fields (timestamp, level, message, service, etc.)
+- Timestamp format
+- Log levels used (ERROR, WARN, INFO, DEBUG, etc.)
+
+### Step 2: Parse and Analyze
+
+**For Anomaly Detection Mode:**
+1. **Error Summary**: Count and categorize all ERROR/CRITICAL/FATAL entries
+2. **Warning Patterns**: Identify recurring warnings
+3. **Anomalies**: Look for:
+   - Sudden spikes in error rates
+   - Unusual patterns (repeated failures, timeouts)
+   - Out-of-order events
+   - Missing expected log entries
+   - Performance degradation indicators (slow queries, timeouts)
+4. **Timeline**: Build chronological view of significant events
+
+**For Problem-Focused Mode:**
+1. **Keyword Search**: Find entries related to the problem
+2. **Timeline Reconstruction**: Build sequence of events leading to the issue
+3. **Correlation**: Find related entries across different components
+4. **Root Cause Indicators**: Identify potential causes
+5. **Supporting Evidence**: Gather log excerpts that support findings
+
+### Step 3: Cross-Reference with Codebase (if helpful)
+When you find interesting log entries:
+- Search codebase for the log message to find source location
+- Understand what code path generated the log
+- Identify related error handling or business logic
+
+### Step 4: Generate Report
+
+## Output Format
+
+```markdown
+# Log Analysis Report
+
+## Analysis Info
+- **Source:** [source description]
+- **Mode:** [Anomaly Detection / Problem-Focused: "problem description"]
+- **Time Range:** [start] to [end]
+- **Total Entries:** [count]
+- **Log Format:** [detected format]
+
+## Executive Summary
+[2-3 sentences: main findings, severity assessment]
+
+## Findings
+
+### Critical Issues
+#### [Issue Title]
+- **Severity:** Critical/High/Medium/Low
+- **Occurrences:** [count]
+- **First seen:** [timestamp]
+- **Last seen:** [timestamp]
+- **Log excerpt:**
+  ```
+  [relevant log lines]
+  ```
+- **Code reference:** `file.py:123` (if found)
+- **Analysis:** [what this means, potential impact]
+
+### Warnings and Patterns
+[Similar structure for non-critical findings]
+
+### Anomalies Detected
+[Unusual patterns, spikes, etc.]
+
+## Timeline of Significant Events
+| Time | Event | Severity |
+|------|-------|----------|
+| ... | ... | ... |
+
+## Code References (if applicable)
+| Log Pattern | Source File | Line |
+|-------------|-------------|------|
+| "Error processing..." | `service/handler.py` | 234 |
+
+## Recommendations
+- [Actionable next steps]
+
+## Raw Evidence
+<details>
+<summary>Relevant log excerpts</summary>
+
+[Full log excerpts for reference]
+
+</details>
+```
+```
+
+**Log Source Handling:**
+
+| Source Type | How to Access |
+|-------------|---------------|
+| CSV file | Read file directly, parse CSV columns |
+| Docker container | `docker logs <container>` or `docker compose logs <service>` |
+| Local server | Check common locations: `logs/`, project-specific log paths |
+| Generic file | Read and auto-detect format |
+
+**CSV Format Notes (Datadog exports):**
+- Columns vary but typically include: timestamp, status/level, service, message
+- May have additional fields like host, trace_id, etc.
+- First row is usually headers
+
+---
+
+### Validator Subagent
+
+**Purpose:** Run tests, linters, type checks, and other validation commands. Parse verbose output and return concise verdict.
+
+**Model:** sonnet (needs to run commands and parse output)
+
+**When Used:**
+- Phase 3.5: Pre-Implementation Validation (establish baseline)
+- Phase 4: After implementation batches (for large tasks)
+- Phase 6: Final verification
+
+**Prompt Template:**
+```
+You are a validation specialist. Your job is to run tests, linters, and other validation commands, then report results concisely.
+
+## Validation Type
+{type: "baseline" | "batch" | "final"}
+
+## Project Info
+Project: {project_name}
+Project root: {project_path}
+Project CLAUDE.md: {path to project CLAUDE.md if exists}
+
+## Files Changed (if applicable)
+{list of changed files for targeted validation}
+
+## Your Task
+
+### Step 1: Detect Project Setup
+Read the project's CLAUDE.md or pyproject.toml to understand:
+- Test framework (pytest, unittest, etc.)
+- Test command (poetry run pytest, tox, etc.)
+- Linter (ruff, flake8, etc.)
+- Type checker (mypy, pyright, etc.)
+- Any special setup or environment variables
+
+### Step 2: Run Validation Commands
+
+**For baseline validation:**
+1. Check files exist (if file list provided)
+2. Run syntax check: `poetry run python -m py_compile <files>`
+3. Run linter on changed files (if any)
+4. Run relevant tests (related to changed files)
+
+**For batch validation (during implementation):**
+1. Run linter on changed files
+2. Run tests related to changed files
+3. Quick type check if configured
+
+**For final validation:**
+1. Run full linter
+2. Run full test suite
+3. Run type checker
+4. Check coverage if configured
+
+### Step 3: Parse Results
+For each command:
+- Capture exit code (0 = pass, non-zero = fail)
+- Parse output for specific failures
+- Extract relevant error messages
+
+### Step 4: Generate Report
+
+## Output Format
+
+```markdown
+# Validation Report
+
+## Summary
+- **Overall:** PASS | FAIL
+- **Tests:** X passed, Y failed, Z skipped
+- **Linter:** X issues (Y errors, Z warnings)
+- **Type Check:** X errors
+
+## Test Results
+### Status: PASS | FAIL
+
+#### Failed Tests (if any)
+| Test | Error |
+|------|-------|
+| `test_module::test_name` | Brief error description |
+
+#### Test Output Summary
+[2-3 line summary of what was tested]
+
+## Linter Results
+### Status: PASS | FAIL
+
+#### Issues (if any)
+| File | Line | Rule | Message |
+|------|------|------|---------|
+| `path/file.py` | 42 | E501 | Line too long |
+
+## Type Check Results
+### Status: PASS | FAIL | SKIPPED
+
+#### Errors (if any)
+| File | Line | Error |
+|------|------|-------|
+| `path/file.py` | 42 | Incompatible types... |
+
+## Infrastructure Issues (fixable)
+[Only list issues with test config, linter config, missing deps - NOT business logic]
+
+| Issue | Suggested Fix |
+|-------|---------------|
+| Missing test dependency | `poetry add --dev pytest-mock` |
+| Linter config missing rule | Add to pyproject.toml: ... |
+
+## Verdict
+**{PASS | FAIL | BLOCKED}**
+
+{If FAIL: Brief summary of what needs fixing}
+{If BLOCKED: What's preventing validation from running}
+```
+
+**IMPORTANT:**
+- Do NOT suggest fixes for business logic failures - you lack task context
+- Only suggest fixes for infrastructure/config issues
+- Keep failure descriptions brief - main agent will investigate if needed
+```
+
+**What Returns to Main Agent:**
+- Pass/fail verdict
+- Failure summaries (not full stack traces)
+- Infrastructure fix suggestions only
+- NOT raw command output (stays in subagent context)
+
+---
+
 ## Task Directory Structure
 
 **IMPORTANT:** Every workflow creates a dedicated task directory under `tasks/`.
@@ -1104,16 +1635,19 @@ Output your extracted context now.
 ```
 tasks/
 └── <task-name>/
-    ├── state.json          # Checkpoint state for resume capability
-    ├── problem.md          # Problem statement with classification (Phase 1)
-    ├── plan.md             # Implementation plan (Phase 3)
-    ├── plan-review.md      # Plan review feedback (Phase 3)
-    ├── simplify-review.md  # Code simplification suggestions (Phase 5)
-    ├── code-review.md      # Bug/vulnerability findings (Phase 5)
-    ├── verification.md     # Goal verification results (Phase 6)
-    ├── summary.md          # Final summary of changes (Phase 7)
-    ├── context.md          # (Optional) Only if user requests
-    └── trimmed.md          # (Optional) Only if user requests
+    ├── state.json              # Checkpoint state for resume capability
+    ├── problem.md              # Problem statement with classification (Phase 1)
+    ├── plan.md                 # Implementation plan (Phase 3)
+    ├── plan-review.md          # Plan review feedback (Phase 3)
+    ├── baseline-validation.md  # Pre-implementation validation (Phase 3.5)
+    ├── simplify-review.md      # Code simplification suggestions (Phase 5)
+    ├── code-review.md          # Bug/vulnerability findings (Phase 5)
+    ├── final-validation.md     # Final tests/linter results (Phase 6)
+    ├── verification.md         # Goal verification results (Phase 6)
+    ├── summary.md              # Final summary of changes (Phase 7)
+    ├── log-analysis.md         # (Optional) Log analysis report if logs examined
+    ├── context.md              # (Optional) Only if user requests
+    └── trimmed.md              # (Optional) Only if user requests
 ```
 
 ### File Purposes
@@ -1124,10 +1658,13 @@ tasks/
 | `problem.md` | 1 | Task classification + current/desired state + acceptance criteria |
 | `plan.md` | 3 | Step-by-step implementation with code snippets |
 | `plan-review.md` | 3 | Architectural review feedback, issues, verdict |
+| `baseline-validation.md` | 3.5 | Pre-implementation test/lint results, baseline failures |
 | `simplify-review.md` | 5 | Complexity issues, before/after code |
 | `code-review.md` | 5 | Security, bugs, performance issues by severity |
+| `final-validation.md` | 6 | Final test/lint results, pass/fail verdict |
 | `verification.md` | 6 | Acceptance criteria check, test coverage, verdict |
 | `summary.md` | 7 | Overview, files changed, test results, notes |
+| `log-analysis.md` | Any | (Optional) Log analysis findings, timeline, code references |
 | `context.md` | 2 | (Optional) List of relevant files - only if requested |
 | `trimmed.md` | 2.5 | (Optional) Trimmed file contents - only if requested |
 
@@ -1145,7 +1682,41 @@ tasks/
 /review-code [task|file|staged] # Review for bugs/vulnerabilities
 /verify [task-name]           # Verify implementation matches problem
 /prepare-chat [task]          # Generate files for external chat
+/analyze-logs <source>        # Analyze logs (anomaly detection or problem-focused)
 ```
+
+### Log Analysis Command
+
+**Standalone usage:**
+```bash
+# Anomaly detection - find any issues
+/analyze-logs logs/datadog-export.csv
+/analyze-logs docker:api-service
+
+# Problem-focused - investigate specific issue
+/analyze-logs logs/export.csv --problem "Payment failures after 3pm"
+/analyze-logs docker:cost-module-web --problem "Timeout errors on invoice endpoint"
+```
+
+**Source types:**
+- File: `/analyze-logs path/to/logs.csv` (CSV from Datadog, JSON lines, plain text)
+- Docker: `/analyze-logs docker:<container_name>` (uses docker logs)
+- Local: `/analyze-logs local` (checks project log locations)
+
+**Workflow integration:**
+Log analysis can be invoked at various points in development workflows:
+
+| Context | When to Use | Example |
+|---------|-------------|---------|
+| During `/workflow` | After manual testing in Phase 4 or 6 | "Let me check the logs" → `/analyze-logs docker:api --problem "the error we just saw"` |
+| Bug investigation | As evidence gathering before fixing | `/analyze-logs logs/prod.csv --problem "Users report 500 errors"` |
+| Feature validation | After implementing a feature | `/analyze-logs local --problem "New payment flow"` |
+| General health check | Proactive anomaly detection | `/analyze-logs docker:api-service` |
+
+When used within an existing workflow task:
+- Results are saved to the same `tasks/<task-name>/` directory
+- Report is referenced in subsequent phases (verification, summary)
+- Findings inform implementation decisions
 
 ### External Chat Workflow
 Use `/prepare-chat` when you want to use Claude.ai or ChatGPT for planning:

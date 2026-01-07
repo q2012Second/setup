@@ -18,6 +18,7 @@ For complex tasks, use the structured Claude Code workflow defined in `AGENTS.md
 | `/review-code [file\|staged]` | Review code for bugs/vulnerabilities (opus) |
 | `/verify [problem]` | Verify implementation solves the problem |
 | `/prepare-chat [task]` | Generate context + prompt files for external chat (Claude.ai/ChatGPT) |
+| `/analyze-logs <source>` | Analyze logs for anomalies or specific problems |
 
 ### Workflow Phases
 1. Problem clarification (requires approval)

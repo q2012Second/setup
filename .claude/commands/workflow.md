@@ -30,10 +30,13 @@ $ARGUMENTS
 - `plan.md` - Implementation plan (Phase 3)
 - `plan-review.md` - Plan review feedback (Phase 3)
 - `state.json` - Checkpoint state for resume capability
+- `baseline-validation.md` - Pre-implementation validation (Phase 3.5)
 - `simplify-review.md` - Simplification suggestions (Phase 5)
 - `code-review.md` - Bug/vulnerability findings (Phase 5)
+- `final-validation.md` - Final tests/linter results (Phase 6)
 - `verification.md` - Goal verification (Phase 6)
 - `summary.md` - Final summary (Phase 7)
+- `log-analysis.md` - Log analysis report (if logs analyzed during workflow)
 
 ---
 
@@ -47,11 +50,67 @@ $ARGUMENTS
 | 2. Context Gathering | NO | Explore subagent returns file list only |
 | 2.5. Context Loading | NO | Context-Loader returns trimmed content |
 | 3. Planning | NO | Pass trimmed context to Planner via prompt |
-| 3.5. Pre-Implementation | NO | Validation commands only |
+| 3.5. Pre-Implementation | NO | Validator subagent runs commands |
 | 4. Implementation | YES (only files being edited) | Need line numbers for Edit tool |
 | 5. Code Quality | NO | Pass diff to reviewers, receive issues |
-| 6. Verification | NO | Pass diff to Code-Goal, receive verdict |
+| 6. Verification | NO | Validator + Code-Goal subagents |
 | 7. Final Review | NO | Use git diff for summary |
+| **Log Analysis** | **NO** | **Log-Analyzer subagent parses logs** |
+| **Validation** | **NO** | **Validator subagent runs tests/linters** |
+| **Plan Revision** | **NO** | **Planner subagent revises; only final returns** |
+| **User Changes** | **YES (re-read)** | **NO** |
+
+### Plan Revision Delegation
+
+**NEVER revise plans directly.** When user requests changes to a plan:
+
+1. Spawn **Planner subagent** (Task tool, model=opus) with:
+   - Current plan (from plan.md)
+   - User's feedback/new requirements
+   - Problem statement
+2. Planner revises and updates Design Decisions section
+3. Spawn **Plan-Reviewer subagent** to validate changes
+4. Receive: Updated plan only (previous versions discarded)
+5. Overwrite `plan.md` with new version
+6. Present to user for approval
+
+**Result:** Main agent context has only final plan with embedded rationale.
+
+### User Code Changes Handling
+
+When user says "I made changes" / "I edited the code" during workflow:
+
+1. **Detect changed files:** `git diff --name-only`
+   - Don't rely on user's list (may be incomplete)
+2. **Mark previous reads as STALE** - do not trust old versions
+3. **Re-read changed files** to get current version
+4. **Lightweight review** - check for obvious issues:
+   - Syntax errors, broken imports, inconsistency with plan
+   - If issue spotted → **ASK user before fixing**
+5. **Continue workflow** with current code
+
+**Important:** User changed code for a reason - respect intent, but validate.
+
+### Log Analysis Delegation
+
+**NEVER read logs directly.** When logs need analysis (user provides file, debugging errors, verifying behavior):
+
+1. Spawn **Log-Analyzer subagent** (Task tool, model=sonnet) with:
+   - Log source (file path, docker container, or local)
+   - Mode: "anomaly" (general) or "problem-focused" (with problem description)
+2. Receive: Summary report with findings (NOT raw log content)
+3. Save to `tasks/<task-name>/log-analysis.md` if within a workflow
+
+### Validation Delegation
+
+**NEVER run tests/linters directly.** When validation is needed (baseline, batch, or final):
+
+1. Spawn **Validator subagent** (Task tool, model=sonnet) with:
+   - Validation type: "baseline" | "batch" | "final"
+   - Project info (path, CLAUDE.md location)
+   - Changed files list
+2. Receive: Pass/fail verdict with failure summaries (NOT raw output)
+3. Save to appropriate file based on phase
 
 ---
 
@@ -120,50 +179,61 @@ User can override: "Use full workflow" or "Don't skip phases"
 
 ## Phase 3: Planning (skip for trivial/small)
 
-**Context Rule:** Do NOT read any files. Pass trimmed context via prompt.
+**Context Rule:** Do NOT read any files or revise plans directly. All planning work via subagents.
 
+### Initial Plan Creation:
 1. Spawn **Planner subagent** (Task tool, model=opus) with:
    - Problem statement
    - Trimmed context (in prompt, NOT re-read)
 2. Write plan to `tasks/<task-name>/plan.md`
 3. Spawn **Plan-Reviewer subagent** (Task tool, model=opus) with plan
 4. Write review to `tasks/<task-name>/plan-review.md`
-5. Iterate until "PLAN APPROVED"
+5. Iterate until "PLAN APPROVED" by reviewer
 6. **Save checkpoint**
 7. **STOP and present plan to user for approval**
+
+### Plan Revision (if user requests changes):
+1. Spawn **Planner subagent** with:
+   - Current plan (from plan.md)
+   - User's feedback/new requirements
+   - Problem statement
+2. Planner revises plan, updates Design Decisions section
+3. Spawn **Plan-Reviewer subagent** to validate changes
+4. Overwrite `plan.md` with updated version
+5. Present to user (repeat until approved)
+
+**Note:** Do NOT revise plans in main agent - delegate to Planner subagent.
+Only the final approved plan stays in main context.
 
 ---
 
 ## Phase 3.5: Pre-Implementation Validation (skip for trivial/small)
 
-**Context Rule:** Do NOT read files. Only run validation commands.
+**Context Rule:** Do NOT run validation commands directly. Delegate to Validator subagent.
 
-1. Run validation checks:
-   ```bash
-   # File existence
-   for file in [files_from_plan]; do test -f "$file"; done
+1. Spawn **Validator subagent** (Task tool, model=sonnet) with:
+   - Validation type: "baseline"
+   - Project info (path, CLAUDE.md location)
+   - Files from plan
+2. Receive validation verdict (NOT raw command output)
+3. Write to `tasks/<task-name>/baseline-validation.md`
+4. If BLOCKED: Stop and report to user
+5. If PASS: **Save checkpoint**, continue to Phase 4
 
-   # Baseline tests
-   poetry run pytest [relevant_tests] --tb=short
-
-   # Syntax check
-   poetry run python -m py_compile [files_from_plan]
-   ```
-   **Note:** Git status NOT checked - user manages git.
-2. If BLOCKED: Stop and report to user
-3. If PASS: **Save checkpoint**, continue to Phase 4
+**Note:** Git status NOT checked - user manages git.
 
 ---
 
 ## Phase 4: Implementation
 
-**Context Rule:** This is the ONLY phase where main agent reads files - and ONLY files being edited.
+**Context Rule:** This is the ONLY phase where main agent reads files - and ONLY files being edited. Delegate validation to Validator subagent.
 
 ### For Large Tasks (Incremental Implementation):
 1. Group plan steps into batches of 2-3 related changes
 2. For each batch:
    - Implement steps
-   - Run relevant tests
+   - Spawn **Validator subagent** (type: "batch") with changed files
+   - Receive pass/fail verdict (NOT raw test output)
    - Spawn Code-Simplifier for batch review
    - Fix issues
    - **Save checkpoint**
@@ -178,6 +248,15 @@ User can override: "Use full workflow" or "Don't skip phases"
    - Mark TODO complete
 4. **Save checkpoint** after completion
 5. Do NOT read files "for context"
+6. Do NOT run tests directly - use Validator subagent
+
+### If User Makes Manual Changes:
+When user says "I made changes" during implementation:
+1. Run `git diff --name-only` to detect ALL changed files
+2. Mark previous reads of those files as STALE
+3. Re-read changed files to get current version
+4. Quick review - if issue spotted, ASK before fixing
+5. Continue with current code
 
 ---
 
@@ -198,15 +277,20 @@ User can override: "Use full workflow" or "Don't skip phases"
 
 ## Phase 6: Verification (skip for trivial)
 
-**Context Rule:** Do NOT read files. Pass diff and problem to Code-Goal.
+**Context Rule:** Do NOT read files or run tests directly. Delegate to Validator and Code-Goal subagents.
 
-1. Spawn **Code-Goal subagent** (Task tool, model=sonnet) with:
+1. Spawn **Validator subagent** (Task tool, model=sonnet) with:
+   - Validation type: "final"
+   - Project info
+   - All changed files
+2. Receive validation verdict (NOT raw test output)
+3. Write to `tasks/<task-name>/final-validation.md`
+4. Spawn **Code-Goal subagent** (Task tool, model=sonnet) with:
    - Problem statement (from problem.md)
    - Diff (from git diff)
-   - Test results
-2. Write to `tasks/<task-name>/verification.md`
-3. Run tests: `poetry run pytest`
-4. **Save checkpoint**
+   - Validation results summary
+5. Write to `tasks/<task-name>/verification.md`
+6. **Save checkpoint**
 
 ---
 
