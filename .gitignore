@@ -8,6 +8,7 @@
 # Root-level Claude configuration
 !CLAUDE.md
 !AGENTS.md
+!CONTEXT-FLOW.md
 
 # Claude commands directory
 !.claude/
