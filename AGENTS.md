@@ -91,6 +91,7 @@ Subagent context is isolated:
 |--------|-------------|-----|
 | Analyze problem | Subagent (Problem-Analyst) | Explores codebase, returns problem statement |
 | Find relevant files | Subagent (Explore) | Exploration reads stay isolated |
+| **Research external docs/APIs** | **Subagent (Web-Researcher)** | Web searches stay isolated; returns structured reference |
 | Read & understand code | Subagent (Context-Loader) | Only trimmed excerpts return |
 | Create plan | Subagent (Planner) | Receives context via prompt, not main agent reads |
 | **Revise plan** | **Subagent (Planner)** | Previous versions discarded; only final returns |
@@ -99,9 +100,30 @@ Subagent context is isolated:
 | Verify solution | Subagent (Code-Goal) | Only verdict returns |
 | **Analyze logs** | **Subagent (Log-Analyzer)** | Logs can be huge; only findings return |
 | **Run tests/linters** | **Subagent (Validator)** | Output can be verbose; only verdict returns |
+| **Run E2E tests** | **Subagent (E2E-Tester)** | Test output, mock logs verbose; only verdict returns |
 | **Edit files** | **Main agent** | Must read to know line numbers |
 | **Show user a file** | **Main agent** | User explicitly requested |
 | **Reload after user changes** | **Main agent** | Re-read to get current version; mark old as stale |
+
+### CRITICAL: Web Research Delegation
+
+**When external documentation, APIs, or SDKs are needed, delegate to Web-Researcher subagent.**
+
+Triggers for web research:
+- Task involves external API integration (MWL, Portmone, Stripe, etc.)
+- Task requires SDK usage not already documented in codebase
+- User asks about unfamiliar technology or library
+- Implementation needs current best practices from official docs
+
+**Always delegate:**
+```
+Main agent: "I need to understand the MWL API"
+→ Spawn Web-Researcher subagent with topic
+→ Optionally use --repo flag for source code analysis
+→ Receive: Structured reference document (saved to research/)
+```
+
+---
 
 ### CRITICAL: Log Analysis Delegation
 
@@ -146,6 +168,28 @@ The subagent:
 - Parses verbose output for failures
 - Returns only: verdict, failure summaries, infrastructure fix suggestions
 - Does NOT suggest business logic fixes (lacks task context)
+
+### CRITICAL: E2E Testing Delegation
+
+**NEVER run E2E tests directly in main agent context.** E2E test output, mock server logs, and seeding output can be hundreds of lines and will consume context rapidly.
+
+When E2E testing is needed (Phase 6.5):
+- Problem-Analyst flagged E2E testing as required
+- User explicitly requested E2E testing
+
+**Always delegate to E2E-Tester subagent:**
+```
+Main agent: "Let me run E2E tests"
+→ Spawn E2E-Tester subagent with service(s) and focus areas
+→ Receive: Pass/fail verdict with test counts and brief failures (NOT raw output)
+```
+
+The subagent:
+- Checks prerequisites (services running, mock server)
+- Handles mock server startup and data seeding
+- Runs pytest and parses output (stays in its isolated context)
+- Returns only: verdict, test counts, brief failure summaries
+- Does NOT return raw pytest output or full tracebacks
 
 ### CRITICAL: Plan Revision Delegation
 
@@ -235,6 +279,7 @@ Was this intentional, or should I fix it?"
 | 4. Implementation | YES (only files being edited) | YES (Validator for batches) |
 | 5. Code Quality | NO | YES (Simplifier, Reviewer) |
 | 6. Verification | NO | YES (Code-Goal, Validator) |
+| 6.5. E2E Testing | NO | YES (runs E2E tests, parses output) |
 | 7. Final Review | NO (use git diff) | NO |
 | **Plan Revision (Phase 3)** | **NO** | **YES (Planner)** |
 | **Log Analysis (any phase)** | **NO** | **YES (Log-Analyzer)** |
@@ -325,6 +370,12 @@ Classification criteria:
 ## Relevant Areas (for Phase 2)
 - [Hint about where to look: module, pattern, etc.]
 
+## E2E Testing (Phase 6.5)
+- **Required:** [yes|no]
+- **Reason:** [Why E2E testing is/isn't needed]
+- **Services:** [cost-module|easy-returns|both|none]
+- **Focus Areas:** [What to test - e.g., "invoice API", "payment flow"]
+
 ## Questions (if any)
 - [Any clarifying questions]
 ```
@@ -333,21 +384,48 @@ Classification criteria:
 
 ## Phase 2: Context Gathering
 
-**Goal:** Identify all relevant files in the codebase.
+**Goal:** Identify all relevant files in the codebase AND gather external documentation if needed.
 
-**Context Rule:** Main agent does NOT read any files. Delegate ALL exploration to Explore subagent.
+**Context Rule:** Main agent does NOT read any files or perform web searches. Delegate to subagents.
 
 ### Steps:
+
+#### 2a. Codebase Exploration
 1. Spawn **Explore subagent** (Task tool, subagent_type="Explore") with the problem description
 2. Receive file list from subagent (NOT file contents)
-3. Pass file list to Phase 2.5
+
+#### 2b. External Research (if needed)
+Determine if external research is needed based on:
+- Problem involves external API/service integration
+- Problem mentions SDK, library, or technology not in codebase
+- Implementation requires understanding third-party docs
+
+If external research is needed:
+1. Spawn **Web-Researcher subagent** via `/web-research` command
+2. Use `--repo` flag if SDK source code would be helpful
+3. Save research to `tasks/<task-name>/research-<topic>.md`
+
+**Examples of when to research:**
+```
+Task: "Add Stripe payment processing"
+→ /web-research Stripe Python SDK --repo stripe/stripe-python
+
+Task: "Integrate with MWL tracking API"
+→ /web-research MWL API documentation
+
+Task: "Add Portmone payment gateway"
+→ /web-research Portmone API integration
+```
 
 ### What Main Agent Receives:
 - List of 10-20 relevant file paths with brief descriptions
 - NO file contents (those stay in Explore subagent's isolated context)
+- Research documents saved to `tasks/<task-name>/research-*.md`
 
 ### Output:
-File list kept in memory. Only save to `context.md` if user explicitly requests.
+- File list kept in memory
+- Research saved to `tasks/<task-name>/research-*.md`
+- Both passed to Phase 2.5/Phase 3
 
 ---
 
@@ -543,21 +621,32 @@ Based on task classification from Phase 1, skip phases that aren't needed:
 
 | Complexity | Phases to Run | Phases to Skip |
 |------------|---------------|----------------|
-| **trivial** | 1, 4, 5, 7 | 2, 2.5, 3, 3.5, 6 |
-| **small** | 1, 2, 4, 5, 7 | 2.5, 3, 3.5, 6 |
-| **medium** | 1, 2, 2.5, 3, 3.5, 4, 5, 6, 7 | None |
-| **large** | All + incremental | None |
+| **trivial** | 1, 4, 5, 7 | 2, 2.5, 3, 3.5, 6, 6.5 |
+| **small** | 1, 2, 4, 5, 7 | 2.5, 3, 3.5, 6, 6.5 |
+| **medium** | 1, 2, 2.5, 3, 3.5, 4, 5, 6, 7 (+6.5 if flagged) | 6.5 unless flagged |
+| **large** | All + incremental (+6.5 if flagged) | 6.5 unless flagged |
 
 ### Skip Conditions:
 - **Skip Phase 2 (Context Gathering)**: If Problem-Analyst already identified all relevant files
 - **Skip Phase 2.5 (Context Loading)**: If <3 files involved
 - **Skip Phase 3 (Planning)**: If <2 files and obvious changes
 - **Skip Phase 6 (Verification)**: If refactor with no behavior change
+- **Skip Phase 6.5 (E2E Testing)**: Unless Problem-Analyst flags `E2E Testing Required: yes`
+
+### Phase 6.5 Trigger Criteria:
+Phase 6.5 runs when Problem-Analyst flags E2E testing as required. Criteria for flagging:
+- Changes to API endpoints (new, modified, or deleted)
+- Changes to authentication/authorization logic
+- Changes to external service integrations (MWL, Portmone, Stripe)
+- Changes to payment flows
+- Changes to request/response serialization
+- User explicitly requests E2E testing
 
 ### User Override:
 User can always request full workflow regardless of classification:
 - "Use full workflow for [task]"
 - "Don't skip any phases"
+- "Run E2E tests" (forces Phase 6.5)
 
 ---
 
@@ -777,38 +866,52 @@ When user says "I made changes" / "I edited the code" / "I fixed X" during imple
 
 ---
 
-## Phase 6.5: E2E Testing (Optional)
+## Phase 6.5: E2E Testing (Conditional)
 
 **Goal:** Verify service behavior through end-to-end API tests with mocked external dependencies.
 
-### When to Use:
-- Changes to API endpoints
-- Changes to external service integrations
-- Changes to authentication/authorization flows
-- When specified by user
+**Trigger:** Runs when Problem-Analyst flags `E2E Testing Required: yes` in Phase 1.
 
-### Prerequisites:
-1. **Service-tester** project at `../service-tester/`
-2. Target service running locally
-3. Mock server running (for mocked dependencies)
+**Context Rule:** Main agent does NOT run E2E tests directly. Delegate ALL E2E testing to E2E-Tester subagent. Only receive verdict and brief summary.
+
+### Subagent Used:
+- **E2E-Tester** (model: sonnet) - Handles prerequisites check, mock server, seeding, test execution, result parsing
+
+### When Phase 6.5 Runs:
+- Problem-Analyst flagged E2E testing as required based on:
+  - Changes to API endpoints
+  - Changes to external service integrations
+  - Changes to authentication/authorization flows
+  - Changes to payment flows
+- User explicitly requested E2E testing
 
 ### Steps:
-1. Start mock server:
-   ```bash
-   cd ../service-tester && ./scripts/start_mock_server.sh
-   ```
-2. Configure target service to use mock URLs (if needed):
-   - **cost-module:** Set `MWL_USER_AUTH_BASE_URL=http://localhost:8888`
-   - **easy-returns:** Run `./scripts/seed_easy_returns.sh`
-3. Run E2E tests:
-   ```bash
-   cd ../service-tester && poetry run pytest -m <service_marker>
-   ```
-4. Review request logs in `../service-tester/logs/`
+1. Spawn **E2E-Tester subagent** (Task tool, model=sonnet) with:
+   - Service(s) to test (from problem statement `E2E Testing > Services`)
+   - Focus areas (from problem statement `E2E Testing > Focus Areas`)
+   - Task name (for output file path)
+2. Subagent handles:
+   - Prerequisites check (services running?)
+   - Mock server startup
+   - Test data seeding
+   - Test execution
+   - Result parsing
+3. Receive E2E testing report from subagent (NOT raw pytest output)
+4. Write to `tasks/<task-name>/e2e-testing.md`
+5. If BLOCKED: Ask user to start required services
+6. If FAIL: Note failures for Phase 7 summary
 
-### Service Markers:
-- `cost_module` - Tests for cost-module service
-- `easy_returns` - Tests for easy-returns-service
+### What Main Agent Receives:
+- Pass/fail/blocked verdict
+- Test counts (passed/failed/skipped)
+- Brief failure summaries
+- Prerequisite status
+- NOT raw pytest output (stays in subagent context)
+- NOT full tracebacks (stays in subagent context)
+
+### Service Test Locations:
+- `tests/cost_module/` - cost-module E2E tests
+- `tests/easy_returns/` - easy-returns E2E tests
 
 ### Mock Coverage by Service:
 
@@ -817,10 +920,44 @@ When user says "I made changes" / "I edited the code" / "I fixed X" during imple
 | cost-module | MWL Auth | - |
 | easy-returns | Portmone | MWL Connection (hardcoded URLs) |
 
+### Output Format:
+```markdown
+# E2E Testing Report
+
+## Test Configuration
+- **Service(s):** [cost-module|easy-returns|both]
+- **Focus Areas:** [from problem statement]
+- **Mock Server:** Running at http://localhost:8888
+
+## Test Results
+- **Total:** X tests
+- **Passed:** Y
+- **Failed:** Z
+- **Skipped:** W
+
+### Failed Tests (if any)
+| Test | Error |
+|------|-------|
+| `test_module::test_name` | Brief error description |
+
+### Test Output Summary
+[2-3 line summary]
+
+## Request Logs
+- Logged to: `../service-tester/logs/`
+- Curl commands: `../service-tester/logs/curl_YYYYMMDD.sh`
+
+## Verdict
+**[PASS|FAIL]**
+
+{If FAIL: Brief summary of what needs fixing}
+```
+
 ### Notes:
 - Request logs generate curl commands for debugging
 - Mock server state persists across tests within a session
 - Reset state via `POST /api/state/reset`
+- If services not running, ask user to start them before proceeding
 
 ---
 
@@ -1007,8 +1144,21 @@ You are a software analyst. Your job is to understand a user's task request by e
 4. **Suggest phases to run** based on complexity:
    - trivial: 1, 4, 7
    - small: 1, 2, 4, 5, 7
-   - medium: 1, 2, 2.5, 3, 4, 5, 6, 7
-   - large: All phases + incremental implementation
+   - medium: 1, 2, 2.5, 3, 4, 5, 6, 7 (+6.5 if E2E needed)
+   - large: All phases + incremental implementation (+6.5 if E2E needed)
+
+5. **Determine if E2E testing is needed** (Phase 6.5):
+   Flag E2E testing as required if ANY of these apply:
+   - Changes to API endpoints (new, modified, or deleted)
+   - Changes to authentication/authorization logic
+   - Changes to external service integrations (MWL, Portmone, Stripe)
+   - Changes to payment flows
+   - Changes to request/response serialization
+   - User explicitly requests E2E testing
+
+   Identify which service(s) need testing:
+   - **cost-module**: Invoice, specification, vendor, cost type APIs
+   - **easy-returns**: Parcel info, carriers, transactions, payments
 
 ## Output Format
 ```markdown
@@ -1036,6 +1186,12 @@ You are a software analyst. Your job is to understand a user's task request by e
 ## Relevant Areas (hints for Phase 2)
 - [Module/directory to focus on]
 - [Related patterns to follow]
+
+## E2E Testing (Phase 6.5)
+- **Required:** [yes|no]
+- **Reason:** [Why E2E testing is/isn't needed]
+- **Services:** [cost-module|easy-returns|both|none]
+- **Focus Areas:** [What to test - e.g., "invoice list API", "payment creation flow"]
 
 ## Questions (if any)
 - [Clarifying questions for user]
@@ -1621,6 +1777,301 @@ For each command:
 
 ---
 
+### E2E-Tester Subagent
+
+**Purpose:** Run end-to-end API tests against running services with mocked external dependencies. Handles mock server setup, test data seeding, test execution, and result parsing.
+
+**Model:** sonnet (needs to run commands and parse output)
+
+**When Used:**
+- Phase 6.5: E2E Testing (when flagged by Problem-Analyst)
+
+**Prompt Template:**
+```
+You are an E2E testing specialist. Your job is to run end-to-end API tests against running services and report results concisely.
+
+## E2E Testing Configuration
+Service(s): {services: "cost-module" | "easy-returns" | "both"}
+Focus Areas: {focus_areas from problem statement}
+Task Name: {task_name}
+
+## Service-Tester Location
+Path: ../service-tester/
+
+## Your Task
+
+### Step 1: Verify Prerequisites
+1. Check if target service(s) are running:
+   - cost-module: `curl -s http://localhost:9300/cost/health/check`
+   - easy-returns: `curl -s http://localhost:8000/swagger/`
+2. If service not running, STOP and report - ask user to start it
+
+### Step 2: Start Mock Server (if not running)
+```bash
+cd ../service-tester
+# Check if already running
+curl -s http://localhost:8888/health || ./scripts/start_mock_server.sh &
+```
+
+### Step 3: Seed Test Data
+Run appropriate seeder based on service:
+- cost-module: `./scripts/seed_cost_module.sh`
+- easy-returns: `./scripts/seed_easy_returns.sh`
+
+### Step 4: Run E2E Tests
+```bash
+cd ../service-tester
+poetry run pytest tests/{service}/ -v --tb=short
+```
+
+### Step 5: Parse Results
+- Count passed/failed/skipped tests
+- Extract failure messages (brief, not full tracebacks)
+- Note any infrastructure issues
+
+### Step 6: Generate Report
+
+## Output Format
+
+```markdown
+# E2E Testing Report
+
+## Test Configuration
+- **Service(s):** [cost-module|easy-returns|both]
+- **Focus Areas:** [from problem statement]
+- **Mock Server:** [Running|Started|Failed to start]
+- **Data Seeding:** [Success|Failed]
+
+## Prerequisites Check
+- **cost-module:** [Running at :9300 | NOT RUNNING]
+- **easy-returns:** [Running at :8000 | NOT RUNNING]
+- **Mock server:** [Running at :8888 | Started | Failed]
+
+## Test Results
+- **Total:** X tests
+- **Passed:** Y
+- **Failed:** Z
+- **Skipped:** W
+
+### Failed Tests (if any)
+| Test | Error |
+|------|-------|
+| `test_module::test_name` | Brief error description |
+
+### Test Output Summary
+[2-3 line summary of what was tested and overall outcome]
+
+## Request Logs
+- Location: `../service-tester/logs/`
+- Curl export: `../service-tester/logs/curl_YYYYMMDD.sh`
+
+## Verdict
+**[PASS | FAIL | BLOCKED]**
+
+{If FAIL: Brief summary of failures}
+{If BLOCKED: What prerequisite failed - service not running, mock server failed, etc.}
+```
+
+**IMPORTANT:**
+- Do NOT include full test output or tracebacks - keep it concise
+- If services are not running, report BLOCKED immediately
+- Only report infrastructure issues that block testing
+- Keep failure descriptions brief - main agent can check logs if needed
+```
+
+**What Returns to Main Agent:**
+- Pass/fail/blocked verdict
+- Test counts (passed/failed/skipped)
+- Brief failure summaries (not full output)
+- Prerequisite status (services running, mock server status)
+- NOT raw pytest output (stays in subagent context)
+- NOT full tracebacks (stays in subagent context)
+
+---
+
+### Web-Researcher Subagent
+
+**Purpose:** Search the web for documentation, APIs, SDKs, and technical references. Optionally fetch GitHub source code using repomix for deeper analysis.
+
+**Model:** sonnet
+
+**Capabilities:**
+- Web search for documentation (WebSearch, WebFetch)
+- GitHub repo fetching via repomix (`--repo` flag)
+- Cross-references docs with actual source code
+
+**Prompt Template:**
+```
+You are a technical research specialist. Your job is to search the web for documentation, APIs, SDKs, and technical references, then extract and organize the most relevant information.
+
+## Research Topic
+{topic}
+
+## Specific Questions (if any)
+{questions}
+
+## Source Code Context (if repo was fetched via repomix)
+{repomix_output - packed source code from GitHub}
+
+## Your Task
+
+1. **Search the web** for relevant documentation:
+   - Use WebSearch to find official documentation, API references, SDKs
+   - Prioritize official sources over blog posts
+   - Search for: "[topic] documentation", "[topic] API reference", "[topic] SDK"
+   - If the topic mentions a specific version, include that in searches
+
+2. **Fetch and analyze pages**:
+   - Use WebFetch on the most relevant search results (top 3-5)
+   - Extract key information: endpoints, methods, parameters, examples
+   - Note authentication requirements, rate limits, pricing if applicable
+
+3. **If source code was provided**, analyze it for:
+   - Key classes/functions and their signatures
+   - Usage patterns from examples/
+   - Type definitions and interfaces
+   - Configuration options
+   - Internal implementation details useful for integration
+
+4. **Organize findings** into a structured reference document
+
+5. **Validate information**:
+   - Cross-reference docs with source code when available
+   - Note any discrepancies between docs and implementation
+   - Flag if documentation seems outdated
+
+## Output Format
+
+Return a comprehensive markdown document:
+
+# [Topic] Reference
+
+> Last researched: [date]
+> Sources: [list of URLs]
+> Repository: [GitHub URL if fetched]
+
+## Overview
+[Brief description]
+
+## Quick Start
+[Minimal example - prefer examples from source if available]
+
+## Installation
+[How to install/add dependency]
+
+## Authentication (if applicable)
+[Auth methods, API keys, etc.]
+
+## API Reference / Key Concepts
+[Main classes, functions, endpoints with signatures]
+
+## Code Examples
+[Practical examples - from docs AND from source examples/]
+
+## Type Definitions (if from source)
+[Key interfaces, types, configs from the source code]
+
+## Best Practices
+[Recommendations - especially from source code patterns]
+
+## Limitations & Gotchas
+[Known issues, limits - check source issues/comments]
+
+## Related Resources
+[Useful links]
+
+## Important Notes
+- Focus on accuracy over comprehensiveness
+- When source is available, prefer it over docs for type signatures
+- Include actual code examples when available
+- Note any rate limits or usage restrictions
+```
+
+**Repomix Integration:**
+```bash
+# Fetch repo before spawning subagent
+repomix --remote user/repo --style markdown --compress \
+  --output research/.repomix-cache/<repo-name>.md
+
+# For large repos, focus on relevant code:
+repomix --remote user/repo --include "src/**,lib/**,examples/**" \
+  --style markdown --compress --output <output>
+```
+
+---
+
+### Test-Writer Subagent
+
+**Purpose:** Write tests for implemented features, following existing test patterns in the codebase.
+
+**Model:** sonnet
+
+**Prompt Template:**
+```
+You are a test writing specialist. Your job is to write comprehensive tests for a feature implementation.
+
+## Feature Description
+{feature_description}
+
+## Files Modified/Created
+{files_list}
+
+## Project Test Conventions
+- Framework: pytest
+- Test location: alongside code in `tests/` subdirectories or dedicated test files
+- Run tests: `poetry run pytest` or `tox`
+
+## Your Task
+
+1. **Analyze the implementation** to understand:
+   - What functionality was added/changed
+   - What are the inputs and outputs
+   - What are the edge cases
+   - What could go wrong
+
+2. **Identify existing test patterns** in the codebase:
+   - How are similar features tested?
+   - What fixtures exist?
+   - What mocking patterns are used?
+
+3. **Write tests** that cover:
+   - Happy path (normal operation)
+   - Edge cases (empty inputs, boundaries)
+   - Error cases (invalid inputs, failures)
+   - Integration points (API endpoints, database)
+
+4. **Follow project conventions**:
+   - Use existing fixtures where possible
+   - Mock external services (MWL, Portmone, carriers, etc.)
+   - Use pytest markers appropriately
+
+## Output Format
+
+For each test file created, provide:
+```markdown
+### File: `path/to/test_file.py`
+
+**Tests:**
+- `test_[name]` - [what it tests]
+- `test_[name]` - [what it tests]
+
+**Coverage:**
+- [x] Happy path
+- [x] Edge case: [description]
+- [x] Error case: [description]
+```
+
+Then write the actual test code.
+
+## Important Notes
+- Do NOT test implementation details, test behavior
+- Do NOT over-mock; use real objects where practical
+- External services (MWL, Portmone, carriers) MUST be mocked
+- Tests must be runnable: `poetry run pytest path/to/test_file.py`
+```
+
+---
+
 ## Task Directory Structure
 
 **IMPORTANT:** Every workflow creates a dedicated task directory under `tasks/`.
@@ -1637,6 +2088,7 @@ tasks/
 └── <task-name>/
     ├── state.json              # Checkpoint state for resume capability
     ├── problem.md              # Problem statement with classification (Phase 1)
+    ├── research-<topic>.md     # (Optional) External API/SDK research (Phase 2)
     ├── plan.md                 # Implementation plan (Phase 3)
     ├── plan-review.md          # Plan review feedback (Phase 3)
     ├── baseline-validation.md  # Pre-implementation validation (Phase 3.5)
@@ -1644,10 +2096,14 @@ tasks/
     ├── code-review.md          # Bug/vulnerability findings (Phase 5)
     ├── final-validation.md     # Final tests/linter results (Phase 6)
     ├── verification.md         # Goal verification results (Phase 6)
+    ├── e2e-testing.md          # (Conditional) E2E test results (Phase 6.5)
     ├── summary.md              # Final summary of changes (Phase 7)
     ├── log-analysis.md         # (Optional) Log analysis report if logs examined
     ├── context.md              # (Optional) Only if user requests
     └── trimmed.md              # (Optional) Only if user requests
+
+research/                       # Cached research (standalone, not task-specific)
+└── <topic>.md                  # Reusable across tasks
 ```
 
 ### File Purposes
@@ -1655,7 +2111,8 @@ tasks/
 | File | Phase | Contains |
 |------|-------|----------|
 | `state.json` | All | Checkpoint state: current phase, completed phases, complexity |
-| `problem.md` | 1 | Task classification + current/desired state + acceptance criteria |
+| `problem.md` | 1 | Task classification + current/desired state + acceptance criteria + E2E requirements |
+| `research-<topic>.md` | 2 | (Optional) External API/SDK documentation and examples |
 | `plan.md` | 3 | Step-by-step implementation with code snippets |
 | `plan-review.md` | 3 | Architectural review feedback, issues, verdict |
 | `baseline-validation.md` | 3.5 | Pre-implementation test/lint results, baseline failures |
@@ -1663,6 +2120,7 @@ tasks/
 | `code-review.md` | 5 | Security, bugs, performance issues by severity |
 | `final-validation.md` | 6 | Final test/lint results, pass/fail verdict |
 | `verification.md` | 6 | Acceptance criteria check, test coverage, verdict |
+| `e2e-testing.md` | 6.5 | (Conditional) E2E test results, pass/fail, request logs |
 | `summary.md` | 7 | Overview, files changed, test results, notes |
 | `log-analysis.md` | Any | (Optional) Log analysis findings, timeline, code references |
 | `context.md` | 2 | (Optional) List of relevant files - only if requested |
@@ -1683,6 +2141,7 @@ tasks/
 /verify [task-name]           # Verify implementation matches problem
 /prepare-chat [task]          # Generate files for external chat
 /analyze-logs <source>        # Analyze logs (anomaly detection or problem-focused)
+/web-research <topic> [--repo] # Search web + optionally fetch GitHub source via repomix
 ```
 
 ### Log Analysis Command
@@ -1717,6 +2176,38 @@ When used within an existing workflow task:
 - Results are saved to the same `tasks/<task-name>/` directory
 - Report is referenced in subsequent phases (verification, summary)
 - Findings inform implementation decisions
+
+### Web Research Command
+
+**Standalone usage:**
+```bash
+# Research API documentation
+/web-research MWL API documentation
+/web-research Portmone payment integration
+
+# Research SDK with source code analysis
+/web-research Stripe Python SDK --repo stripe/stripe-python
+/web-research FastAPI dependency injection --repo fastapi/fastapi
+```
+
+**Source types:**
+- Topic only: `/web-research <topic>` (web search + fetch docs)
+- With repo: `/web-research <topic> --repo <user/repo>` (web search + GitHub source analysis)
+
+**Workflow integration:**
+Web research can be invoked during context gathering or standalone:
+
+| Context | When to Use | Example |
+|---------|-------------|---------|
+| During `/workflow` | Phase 2 when external integration needed | `/web-research Portmone API` |
+| Before implementation | Understanding unfamiliar library | `/web-research FastAPI background tasks` |
+| Debugging integration | When external service behaves unexpectedly | `/web-research MWL error codes` |
+| Learning | User asks about technology | `/web-research "how do I use celery beat"` |
+
+**Research caching:**
+- Results are saved to `research/<topic>.md` or `tasks/<task-name>/research-<topic>.md`
+- Check for existing research before spawning new searches
+- Research files persist across sessions
 
 ### External Chat Workflow
 Use `/prepare-chat` when you want to use Claude.ai or ChatGPT for planning:

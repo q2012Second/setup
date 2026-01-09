@@ -20,7 +20,8 @@ This repository contains a structured AI-assisted development workflow configura
 │       ├── review-code.md           # Security-focused code review
 │       ├── verify.md                # Implementation verification
 │       ├── prepare-chat.md          # External chat preparation
-│       └── analyze-logs.md          # Log analysis (anomaly/problem-focused)
+│       ├── analyze-logs.md          # Log analysis (anomaly/problem-focused)
+│       └── web-research.md          # Web research for APIs/SDKs/docs
 └── projects/                        # Example project configurations
     ├── cost-module/
     │   └── CLAUDE.md                # FastAPI microservice config example
@@ -50,6 +51,7 @@ This repository contains a structured AI-assisted development workflow configura
 | `/verify` | `verify.md` | Code-Goal subagent to verify implementation matches original problem |
 | `/prepare-chat` | `prepare-chat.md` | Generate context files for use with external chat interfaces (Claude.ai, ChatGPT) |
 | `/analyze-logs` | `analyze-logs.md` | Log-Analyzer subagent for anomaly detection or problem-focused log analysis |
+| `/web-research` | `web-research.md` | Web-Researcher subagent for external API/SDK documentation with optional GitHub source analysis |
 
 ### Project-Specific Configuration Examples
 
@@ -75,7 +77,8 @@ The workflow is designed to minimize context usage by delegating exploratory wor
 │  [CONDITIONAL: Skip phases based on task complexity]                        │
 │                                                                             │
 │  2. CONTEXT GATHERING (skip for trivial)                                    │
-│     └─► Explore subagent → Find relevant files                              │
+│     ├─► Explore subagent → Find relevant files                              │
+│     └─► Web-Researcher subagent → External docs/APIs (if needed)            │
 │                                                                             │
 │  2.5. CONTEXT LOADING (skip for trivial/small)                              │
 │     └─► Context-Loader subagent → Read & trim files                         │
@@ -131,6 +134,7 @@ The workflow minimizes main agent context by delegating to subagents:
 |--------|--------------|---------|
 | Analyze problem | Problem-Analyst | Problem statement (not file contents) |
 | Find files | Explore | File list (not contents) |
+| Research external APIs/docs | Web-Researcher | Structured reference document |
 | Read & trim files | Context-Loader | Trimmed excerpts only |
 | Create/revise plan | Planner | Final plan only |
 | Run tests/linters | Validator | Pass/fail verdict (not raw output) |
@@ -182,6 +186,10 @@ Resume with: "Continue workflow" or "Resume [task-name]"
 # Analyze logs for specific problem
 /analyze-logs logs/export.csv --problem "Payment failures after 3pm"
 /analyze-logs docker:cost-module-web --problem "Timeout errors"
+
+# Research external APIs/SDKs
+/web-research MWL API documentation
+/web-research Stripe Python SDK --repo stripe/stripe-python
 ```
 
 ## Key Design Principles
@@ -200,10 +208,12 @@ Resume with: "Continue workflow" or "Resume [task-name]"
 |----------|-------|---------|
 | Problem-Analyst | sonnet | Explores codebase, classifies task, formulates problem statement |
 | Explore | sonnet | Finds relevant files without loading contents |
+| Web-Researcher | sonnet | Searches web for API/SDK docs, optionally fetches GitHub source via repomix |
 | Context-Loader | sonnet | Reads files and extracts relevant excerpts for planning |
 | Planner | opus | Creates and revises implementation plans |
 | Plan-Reviewer | opus | Reviews plans for architecture and correctness |
 | Validator | sonnet | Runs tests/linters, returns pass/fail verdicts |
+| Test-Writer | sonnet | Writes tests for implemented features following project patterns |
 | Code-Simplifier | sonnet | Identifies complexity and suggests simplifications |
 | Code-Reviewer | opus | Finds bugs, vulnerabilities, performance issues |
 | Code-Goal | sonnet | Verifies implementation matches problem statement |
@@ -223,6 +233,7 @@ Each workflow creates a task directory with output files:
 tasks/<task-name>/
 ├── state.json              # Checkpoint state for resume
 ├── problem.md              # Problem statement with classification
+├── research-<topic>.md     # (Optional) External API/SDK research
 ├── plan.md                 # Implementation plan
 ├── plan-review.md          # Plan review feedback
 ├── baseline-validation.md  # Pre-implementation validation
@@ -232,6 +243,9 @@ tasks/<task-name>/
 ├── verification.md         # Goal verification results
 ├── summary.md              # Final summary
 └── log-analysis.md         # (Optional) Log analysis report
+
+research/                   # Cached standalone research (reusable across tasks)
+└── <topic>.md
 ```
 
 ## Notes
