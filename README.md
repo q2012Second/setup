@@ -11,17 +11,30 @@ This repository contains a structured AI-assisted development workflow configura
 ├── README.md                        # This file
 ├── .gitignore                       # Git ignore (includes only setup files)
 ├── .claude/
-│   └── commands/                    # Slash command definitions
-│       ├── workflow.md              # Full 7-phase workflow
-│       ├── plan.md                  # Planning subagent
-│       ├── review-plan.md           # Plan review subagent
-│       ├── gather-context.md        # Context gathering
-│       ├── simplify.md              # Code simplification
-│       ├── review-code.md           # Security-focused code review
-│       ├── verify.md                # Implementation verification
-│       ├── prepare-chat.md          # External chat preparation
-│       ├── analyze-logs.md          # Log analysis (anomaly/problem-focused)
-│       └── web-research.md          # Web research for APIs/SDKs/docs
+│   ├── commands/                    # Slash command definitions
+│   │   ├── workflow.md              # Full 7-phase workflow
+│   │   ├── plan.md                  # Planning subagent
+│   │   ├── review-plan.md           # Plan review subagent
+│   │   ├── gather-context.md        # Context gathering
+│   │   ├── simplify.md              # Code simplification
+│   │   ├── review-code.md           # Security-focused code review
+│   │   ├── verify.md                # Implementation verification
+│   │   ├── prepare-chat.md          # External chat preparation
+│   │   ├── analyze-logs.md          # Log analysis (anomaly/problem-focused)
+│   │   └── web-research.md          # Web research for APIs/SDKs/docs
+│   └── agents/                      # Subagent prompt definitions
+│       ├── problem-analyst.md       # Problem clarification & classification
+│       ├── planner.md               # Implementation planning (opus)
+│       ├── plan-reviewer.md         # Plan review (opus)
+│       ├── context-loader.md        # File reading & trimming
+│       ├── code-simplifier.md       # Code simplification (opus)
+│       ├── code-reviewer.md         # Bug/vulnerability detection (opus)
+│       ├── code-goal.md             # Implementation verification
+│       ├── validator.md             # Test/linter execution
+│       ├── test-writer.md           # Test generation
+│       ├── log-analyzer.md          # Log analysis
+│       ├── e2e-tester.md            # E2E testing
+│       └── web-researcher.md        # External API/SDK research
 └── projects/                        # Example project configurations
     ├── cost-module/
     │   └── CLAUDE.md                # FastAPI microservice config example
@@ -52,6 +65,25 @@ This repository contains a structured AI-assisted development workflow configura
 | `/prepare-chat` | `prepare-chat.md` | Generate context files for use with external chat interfaces (Claude.ai, ChatGPT) |
 | `/analyze-logs` | `analyze-logs.md` | Log-Analyzer subagent for anomaly detection or problem-focused log analysis |
 | `/web-research` | `web-research.md` | Web-Researcher subagent for external API/SDK documentation with optional GitHub source analysis |
+
+### Subagent Definitions (`.claude/agents/`)
+
+Standalone prompt files for each subagent. These define the agent's model, allowed tools, and prompt template.
+
+| File | Agent | Model |
+|------|-------|-------|
+| `problem-analyst.md` | Problem-Analyst | sonnet |
+| `planner.md` | Planner | opus |
+| `plan-reviewer.md` | Plan-Reviewer | opus |
+| `context-loader.md` | Context-Loader | sonnet |
+| `code-simplifier.md` | Code-Simplifier | opus |
+| `code-reviewer.md` | Code-Reviewer | opus |
+| `code-goal.md` | Code-Goal | sonnet |
+| `validator.md` | Validator | sonnet |
+| `test-writer.md` | Test-Writer | sonnet |
+| `log-analyzer.md` | Log-Analyzer | sonnet |
+| `e2e-tester.md` | E2E-Tester | sonnet |
+| `web-researcher.md` | Web-Researcher | sonnet |
 
 ### Project-Specific Configuration Examples
 
