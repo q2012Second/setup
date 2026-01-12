@@ -14,7 +14,7 @@ This is the root workspace for the Meest project containing multiple interconnec
 | Loading file context | Context-Loader subagent (sonnet) |
 | Planning implementation | `/plan` - Planner subagent (opus) |
 | Reviewing a plan | `/review-plan` - Plan-Reviewer subagent (opus) |
-| Simplifying code | `/simplify` - Code-Simplifier subagent (sonnet) |
+| Simplifying code | `/simplify` - Code-Simplifier subagent (opus) |
 | Reviewing code | `/review-code` - Code-Reviewer subagent (opus) |
 | Verifying solution | `/verify` - Code-Goal subagent (sonnet) |
 | Running tests/linters | Validator subagent (sonnet) |

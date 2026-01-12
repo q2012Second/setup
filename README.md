@@ -214,7 +214,7 @@ Resume with: "Continue workflow" or "Resume [task-name]"
 | Plan-Reviewer | opus | Reviews plans for architecture and correctness |
 | Validator | sonnet | Runs tests/linters, returns pass/fail verdicts |
 | Test-Writer | sonnet | Writes tests for implemented features following project patterns |
-| Code-Simplifier | sonnet | Identifies complexity and suggests simplifications |
+| Code-Simplifier | opus | Identifies complexity and suggests simplifications |
 | Code-Reviewer | opus | Finds bugs, vulnerabilities, performance issues |
 | Code-Goal | sonnet | Verifies implementation matches problem statement |
 | Log-Analyzer | sonnet | Analyzes logs for anomalies or specific problems |

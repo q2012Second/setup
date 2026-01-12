@@ -265,7 +265,7 @@ When user says "I made changes" during implementation:
 **Context Rule:** Do NOT read files. Pass diff to subagents, receive issue lists.
 
 1. Generate diff: `git diff`
-2. Spawn **Code-Simplifier subagent** (Task tool, model=sonnet) with diff
+2. Spawn **Code-Simplifier subagent** (Task tool, model=opus) with diff
 3. Write to `tasks/<task-name>/simplify-review.md`
 4. Apply suggestions (read only files being modified)
 5. Spawn **Code-Reviewer subagent** (Task tool, model=opus) with updated diff

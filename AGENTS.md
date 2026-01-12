@@ -793,7 +793,7 @@ When user says "I made changes" / "I edited the code" / "I fixed X" during imple
 **Context Rule:** Main agent does NOT read files. Delegate ALL review to subagents. Only receive issue summaries.
 
 ### Subagents Used:
-- **Code-Simplifier** (model: sonnet) - Removes unnecessary complexity
+- **Code-Simplifier** (model: opus) - Removes unnecessary complexity
 - **Code-Reviewer** - Finds bugs, vulnerabilities, performance issues
 
 ### Quality Loop:
@@ -814,7 +814,7 @@ When user says "I made changes" / "I edited the code" / "I fixed X" during imple
 
 ### Steps:
 1. Generate diff of all changes using `git diff`
-2. Spawn **Code-Simplifier subagent** (Task tool, model=sonnet) with:
+2. Spawn **Code-Simplifier subagent** (Task tool, model=opus) with:
    - Diff content (NOT by re-reading files)
    - Problem context
 3. Receive simplification suggestions

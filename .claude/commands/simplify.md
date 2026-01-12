@@ -47,7 +47,7 @@ mkdir -p tasks/<task-name>/
 ## Instructions
 
 1. Get diff via `git diff` (do NOT read files directly)
-2. Spawn **Code-Simplifier subagent** (Task tool, model=sonnet):
+2. Spawn **Code-Simplifier subagent** (Task tool, model=opus):
    - Pass diff content in prompt
    - Subagent will read files if needed (stays in its isolated context)
 3. Receive suggestions from subagent
