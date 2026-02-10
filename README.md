@@ -86,7 +86,6 @@ flowchart TD
 | Test-Writer | sonnet | Write tests following project conventions |
 | Code-Reviewer | opus | Find bugs, vulnerabilities, perf issues |
 | Code-Goal | sonnet | Verify implementation matches requirements |
-| Code-Simplifier | opus | Find unnecessary complexity |
 | E2E-Tester | sonnet | Run e2e API tests against running services |
 | Web-Researcher | sonnet | Search web for docs/APIs/references |
 | Log-Analyzer | sonnet | Analyze logs for anomalies |
@@ -99,7 +98,6 @@ flowchart TD
 | `/plan` | Create implementation plan only |
 | `/review-plan` | Review an existing plan |
 | `/review-code` | Review code for bugs and vulnerabilities |
-| `/simplify` | Find code simplification opportunities |
 | `/verify` | Verify implementation matches requirements |
 | `/gather-context` | Find relevant files for a task |
 | `/prepare-chat` | Prepare prompt for external LLM |
