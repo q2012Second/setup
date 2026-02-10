@@ -4,7 +4,7 @@ argument-hint: [task-name]
 allowed-tools: Task, Read, Glob, Grep, Bash, Write
 ---
 
-# Code-Goal Subagent
+# Verify Implementation
 
 Verify that the implementation actually solves the stated problem.
 
@@ -27,83 +27,33 @@ $ARGUMENTS
 1. Read problem statement from `tasks/<task-name>/problem.md`
 2. Get implementation changes: `git diff main` or staged changes
 3. Find related test files
-4. Invoke Code-Goal subagent:
-   ```
-   Task tool parameters:
-   - subagent_type: "general-purpose"
-   - model: "sonnet"
-   - prompt: [Use template below]
-   ```
+4. Spawn **Code-Goal** agent (Task tool):
+   - Use agent defined in `~/.claude/agents/code-goal.md`
+   - model: sonnet
+   - Pass problem, diff, and test info in prompt
+5. Receive verification verdict from agent
+6. Save to output file
 
-## Code-Goal Prompt Template
+## Agent Invocation
 
 ```
-You are verifying that an implementation matches its requirements.
+Task tool parameters:
+- subagent_type: "Code-Goal"
+- model: "sonnet"
+- prompt: |
+    ## Original Problem Statement
+    [Content from problem.md]
 
-## Original Problem Statement
-[Content from problem.md]
+    ## Acceptance Criteria
+    [Extracted from problem.md]
 
-## Acceptance Criteria
-[Extracted from problem.md]
+    ## Implementation Changes
+    [Git diff content]
 
-## Implementation Changes
-[Git diff content]
+    ## Test Cases
+    [Content from test files]
 
-## Test Cases
-[Content from test files]
-
-## Your Task
-Verify:
-
-### 1. Problem Solved
-For each acceptance criterion:
-- Is it addressed by the implementation?
-- How specifically is it solved?
-
-### 2. Test Coverage
-- Are acceptance criteria covered by tests?
-- Are edge cases tested?
-- Any missing test scenarios?
-
-### 3. Completeness
-- Any partial implementations?
-- TODO comments left behind?
-- Incomplete error handling?
-
-## Output Format
-```markdown
-# Verification: [Task Name]
-
-## Acceptance Criteria Check
-
-| Criterion | Status | Evidence |
-|-----------|--------|----------|
-| [Criterion 1] | [PASS/FAIL] | [How it's met or why it fails] |
-| [Criterion 2] | [PASS/FAIL] | [How it's met or why it fails] |
-
-## Test Coverage
-
-| Criterion | Test File | Test Case |
-|-----------|-----------|-----------|
-| [Criterion 1] | `test_file.py` | `test_function_name` |
-| [Criterion 2] | - | MISSING |
-
-## Missing Tests
-- [ ] [Test that should be added]
-
-## Gaps Found
-- [Gap 1]: [Description and how to fix]
-
-## TODOs/Incomplete Items
-- [ ] [TODO found in code]
-
-## Verdict
-**[VERIFIED / NEEDS WORK]**
-
-### If NEEDS WORK:
-1. [Action item 1]
-2. [Action item 2]
-```
+    Verify this implementation following your guidelines.
 ```
 
 ## Output

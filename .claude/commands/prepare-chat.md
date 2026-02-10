@@ -1,7 +1,7 @@
 ---
 description: Prepare context and prompt files for external chat (Claude.ai, ChatGPT) to generate or review a plan
-argument-hint: [task description]
-allowed-tools: Task, Read, Glob, Grep, Bash, Write
+argument-hint: [task description or "review plan for <task-name>"]
+allowed-tools: Task
 ---
 
 # Prepare Chat Prompt
@@ -11,142 +11,78 @@ Generate context and prompt files for use in external chat interfaces.
 ## Task
 $ARGUMENTS
 
-## Setup
-
-1. **Derive task name** (kebab-case from description)
-2. **Create task directory**: `mkdir -p tasks/<task-name>/`
-
 ## Instructions
 
-### Step 1: Gather Relevant Files
+**Context Rule:** Do NOT read files or run commands directly. Delegate all work to Chat-Preparer subagent.
 
-1. Use Explore subagent to find 10-20 most relevant files for the task
-2. List the files to include in repomix
+### Determine Mode
 
-### Step 2: Generate Context with Repomix
+1. If task starts with "review plan" or "review <task-name>":
+   - Mode: "plan-review"
+   - Extract task name from arguments
+   - Task directory: `tasks/<task-name>/`
 
-Run repomix to create the context file:
+2. Otherwise:
+   - Mode: "plan-generation"
+   - Derive task name (kebab-case from description)
+   - Create task directory: `mkdir -p tasks/<task-name>/`
 
-```bash
-repomix -o tasks/<task-name>/chat-context.txt --include "file1.py,file2.py,..."
-```
+### Spawn Chat-Preparer Subagent
 
-**Important repomix notes:**
-- Use relative paths from workspace root (e.g., `easy-returns-service/parcels/models/parcel.py`)
-- Comma-separated, no spaces
-- Output goes to task directory
+Use the Task tool with:
+- `subagent_type`: "general-purpose"
+- `model`: "sonnet"
+- `prompt`: Include the Chat-Preparer agent instructions from `~/.claude/agents/chat-preparer.md` along with:
+  - Task description or plan to review
+  - Task directory path
+  - Mode ("plan-generation" or "plan-review")
 
-### Step 3: Generate Prompt File
-
-Create `tasks/<task-name>/chat-prompt.md` with the following structure:
-
-```markdown
-# Task: [Task Name]
-
-## Problem Statement
-[Reformulated problem description]
-
-## Current State
-[What exists now - based on codebase exploration]
-
-## Desired State
-[What should exist after implementation]
-
-## Constraints
-- Follow existing patterns in the codebase
-- Minimize changes while fully solving the problem
-- Consider edge cases and error handling
-- [Any task-specific constraints]
-
-## Codebase Context
-The attached file `chat-context.txt` contains the relevant source code.
-
-Key files included:
-1. `path/to/file1.py` - [Why it's relevant]
-2. `path/to/file2.py` - [Why it's relevant]
-...
-
-## Your Task
-Create a detailed, step-by-step implementation plan that:
-
-1. **Follows existing patterns** - Match the coding style and architecture in the context
-2. **Is specific** - Include exact file paths, function names, and code snippets
-3. **Handles edge cases** - Consider what could go wrong
-4. **Includes testing** - Define test cases for the implementation
-
-## Expected Output Format
+Example prompt for the subagent:
 
 ```
-# Implementation Plan: [Task Name]
+You are the Chat-Preparer agent. Your job is to prepare context and prompts for external LLM chat.
 
-## Overview
-[Brief description]
+[Include full agent instructions from chat-preparer.md]
 
-## Prerequisites
-- [Any setup needed]
+## Your Input
 
-## Implementation Steps
+**Mode:** [plan-generation|plan-review]
+**Task Directory:** tasks/<task-name>/
+**Task:** [description or "review plan"]
 
-### Step 1: [Title]
-**File:** `path/to/file.py`
-**Changes:**
-- [Specific change]
-
-**Code:**
-\`\`\`python
-# Code snippet
-\`\`\`
-
-### Step 2: [Title]
-...
-
-## Testing Strategy
-- [ ] [Test case 1]
-- [ ] [Test case 2]
-
-## Edge Cases
-- [Edge case]: [How it's handled]
-
-## Risks & Mitigations
-- **Risk:** [Description]
-  **Mitigation:** [Solution]
-```
+Execute the steps and create all required files.
 ```
 
-### Step 4: Create Combined File (Optional)
+### Report Results
 
-For convenience, create `tasks/<task-name>/chat-combined.md` that includes both the prompt and instructions for attaching context:
+After subagent completes, inform user:
 
-```markdown
-[Contents of chat-prompt.md]
+**For plan-generation:**
+```
+Chat files ready in `tasks/<task-name>/`:
 
----
+1. Copy `chat-prompt.md` to Claude.ai/ChatGPT
+2. Attach `chat-context.txt`
+3. Save response to `tasks/<task-name>/plan.md`
+4. Then run `/review-plan <task-name>`
+```
 
-## Instructions for Use
+**For plan-review:**
+```
+Chat files ready in `tasks/<task-name>/`:
 
-1. Copy this entire prompt
-2. Attach `chat-context.txt` as a file (or paste its contents if the chat doesn't support attachments)
-3. Send to Claude.ai or ChatGPT
-4. Save the response to `tasks/<task-name>/plan.md`
+1. Copy `chat-prompt.md` to Claude.ai/ChatGPT
+2. Attach `chat-context.txt`
+3. Paste response into `tasks/<task-name>/external-review.md`
+4. Then say "continue workflow" to resume
 ```
 
 ## Output Files
-
-After running this command, the task directory will contain:
 
 ```
 tasks/<task-name>/
 ├── chat-context.txt    # Repomix output with source code
 ├── chat-prompt.md      # Prompt to paste into chat
-└── chat-combined.md    # Combined instructions + prompt
+├── chat-combined.md    # Combined instructions + prompt
+└── external-review.md  # Placeholder for review response (plan-review mode only)
 ```
-
-## Usage
-
-1. Run: `/prepare-chat add rate limiting to login endpoint`
-2. Open `tasks/add-rate-limiting-to-login/chat-prompt.md`
-3. Copy prompt to Claude.ai/ChatGPT
-4. Attach `chat-context.txt` or paste its contents
-5. Get the plan response
-6. Save response to `tasks/add-rate-limiting-to-login/plan.md`
-7. Continue with `/review-plan add-rate-limiting-to-login`

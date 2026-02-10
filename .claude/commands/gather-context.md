@@ -17,12 +17,14 @@ $ARGUMENTS
    - Search for related keywords
    - Find files by pattern matching
    - Look for existing similar implementations
+   - Trace code paths from entry points through the call chain
 
-2. Identify 10-20 most relevant files:
+2. Identify all relevant files (focus on relevance, not a fixed count):
    - Core files (directly involved in the task)
-   - Related files (may be affected by changes)
+   - Related files (callers, callees — may be affected by changes)
    - Test files (existing tests to consider)
-   - Config files (if relevant)
+   - Config/migration files (if relevant)
+   - Research files from `research/` directory (if relevant to the task domain)
 
 3. Categorize files by relevance level
 

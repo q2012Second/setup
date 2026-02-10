@@ -1,24 +1,26 @@
 ---
 description: Review code for bugs, vulnerabilities, and performance issues using the Code-Reviewer subagent (opus model)
 argument-hint: [task-name, file path, or 'staged']
-allowed-tools: Task, Read, Glob, Grep, Bash, Write
+allowed-tools: Task, Read, Glob, Grep, Bash, Write, Edit, AskUserQuestion
 ---
 
-# Code-Reviewer Subagent
+# Review Code
 
-Perform security-focused code review to find bugs, vulnerabilities, and performance issues.
+Perform code review to find over-engineering, style inconsistencies, bugs, vulnerabilities, and performance issues. Iterates until clean.
 
 ## Input
 $ARGUMENTS
 
 ## CRITICAL: Context Rule
 
-**Main agent does NOT read files.** Only:
+**Main agent does NOT read source files for review.** Only:
 1. Get diff via `git diff`
-2. Pass diff to Code-Reviewer subagent
-3. Receive issue list from subagent
+2. Pass diff to Code-Reviewer agent
+3. Receive issue list from agent
+4. Fix issues (read only files being fixed)
+5. Re-review until clean
 
-The subagent will read files if it needs additional context.
+The agent will read files to check existing style and patterns.
 
 ## Resolve Input
 
@@ -46,97 +48,42 @@ mkdir -p tasks/<task-name>/
 
 ## Instructions
 
+### Review Loop
+
+Repeat until Code-Reviewer returns **NO ISSUES FOUND** or only Low-severity issues remain:
+
 1. Get diff via `git diff` (do NOT read files directly)
-2. Spawn **Code-Reviewer subagent** (Task tool, model=opus):
+2. Spawn **Code-Reviewer** agent (Task tool):
+   - Use agent defined in `~/.claude/agents/code-reviewer.md`
+   - model: opus
    - Pass diff content in prompt
-   - Subagent will read files if needed (stays in its isolated context)
-3. Receive issue list from subagent
-4. Write to output file
+3. Write review to output file
+4. If **Critical, High, or Medium** issues found:
+   a. Fix issues (read only files being modified)
+   b. Go back to step 1 with fresh diff
+5. If only **Low** or **NO ISSUES FOUND** → done
 
-## Code-Reviewer Prompt Template
+## Agent Invocation
 
 ```
-You are a security-focused code reviewer.
+Task tool parameters:
+- subagent_type: "Code-Reviewer"
+- model: "opus"
+- prompt: |
+    ## Changes to Review
+    [Diff content from git diff]
 
-## Changes to Review
-[Diff content from git diff]
-
-## Your Task
-Review the code for:
-
-### 1. Security Vulnerabilities
-- SQL injection, XSS, command injection
-- Authentication/authorization bypasses
-- Exposed secrets or sensitive data
-- Insecure deserialization
-- CSRF vulnerabilities
-- Path traversal
-- SSRF (Server-Side Request Forgery)
-
-### 2. Bugs
-- Null/undefined references
-- Off-by-one errors
-- Race conditions
-- Incorrect error handling
-- Logic errors
-- Type mismatches
-- Resource leaks
-
-### 3. Performance Issues
-- N+1 queries
-- Memory leaks
-- Blocking operations in async code
-- Inefficient algorithms
-- Missing database indexes
-- Unnecessary database calls
-- Large payload handling
-
-### 4. Breaking Changes
-- API compatibility issues
-- Database migration risks
-- Changed return types/signatures
-- Removed functionality
-
-**If you need more context**, use the Read tool to examine specific files.
-Your file reads stay in your isolated context and don't pollute the main agent.
-
-## Output Format
-```markdown
-# Code Review: [Task/File Name]
-
-## Summary
-[Overview - X critical, Y high, Z medium, W low issues]
-
-## Critical Issues
-### [Issue Title]
-- **Location:** `file.py:123`
-- **Type:** [Security/Bug/Performance/Breaking]
-- **Description:** [What's wrong]
-- **Impact:** [What could happen]
-- **Fix:**
-\`\`\`python
-# suggested fix
-\`\`\`
-
-## High Issues
-...
-
-## Medium Issues
-...
-
-## Low Issues
-...
-
-## Recommendations
-- [General improvement suggestions]
-
-## Verdict
-[PASS / PASS WITH WARNINGS / FAIL]
-```
-
-If no issues: "NO ISSUES FOUND - Code review passed."
+    Review this code following your guidelines across all 10 categories.
 ```
 
 ## Output
 
-Save subagent's response to `tasks/<task-name>/code-review.md`
+Save final review to `tasks/<task-name>/code-review.md`
+
+Present summary:
+```
+Code review complete after N iteration(s).
+- Issues found: X total (Y fixed, Z low-severity remaining)
+- Categories: [breakdown]
+- Full report: tasks/<task-name>/code-review.md
+```

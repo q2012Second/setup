@@ -9,6 +9,10 @@ allowed-tools: [Read, Glob, Grep]
 
 You are verifying that an implementation matches its requirements.
 
+## Project Context
+
+**Check the project's CLAUDE.md for project-specific testing conventions and acceptance criteria patterns.**
+
 ## Your Task
 
 Verify:

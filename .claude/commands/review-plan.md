@@ -4,7 +4,7 @@ argument-hint: [task-name or path to plan.md]
 allowed-tools: Task, Read, Glob, Grep, Write
 ---
 
-# Plan-Reviewer Subagent
+# Review Plan
 
 Review an implementation plan from an architecture standpoint.
 
@@ -26,67 +26,31 @@ $ARGUMENTS
 
 1. Read the plan file
 2. Read context file if available
-3. Invoke the Plan-Reviewer subagent:
-   ```
-   Task tool parameters:
-   - subagent_type: "general-purpose"
-   - model: "opus"
-   - prompt: [Use template below]
-   ```
+3. Spawn **Plan-Reviewer** agent (Task tool):
+   - Use agent defined in `~/.claude/agents/plan-reviewer.md`
+   - model: opus
+   - Pass plan content and context in prompt
+4. Receive review from agent
+5. Save to output file
 
-## Plan-Reviewer Prompt Template
+## Agent Invocation
 
 ```
-You are a senior software architect reviewing an implementation plan.
+Task tool parameters:
+- subagent_type: "Plan-Reviewer"
+- model: "opus"
+- prompt: |
+    ## Problem Statement
+    [Extract from plan or problem.md]
 
-## Problem Statement
-[Extract from plan or problem.md]
+    ## Proposed Plan
+    [Full plan content]
 
-## Proposed Plan
-[Full plan content]
+    ## Codebase Context
+    [From context.md or summary]
 
-## Codebase Context
-[From context.md or summary]
-
-## Your Task
-Review this plan critically for:
-
-1. **Correctness**: Does this plan actually solve the problem?
-2. **Completeness**: Are all edge cases handled?
-3. **Architecture**: Does it fit well with existing patterns?
-4. **Simplicity**: Is this the simplest solution? Can anything be removed?
-5. **Risks**: What could go wrong? Missing error handling?
-6. **Testing**: Is the test strategy adequate?
-
-## Output Format
-```markdown
-# Plan Review: [Task Name]
-
-## Verdict
-[APPROVED / NEEDS REVISION]
-
-## Issues Found
-
-### Critical
-- **[Issue]**: [Description]
-  - Suggested fix: [Solution]
-
-### Major
-- **[Issue]**: [Description]
-  - Suggested fix: [Solution]
-
-### Minor
-- **[Issue]**: [Description]
-  - Suggested fix: [Solution]
-
-## Strengths
-- [What's good about the plan]
-
-## Recommendations
-- [Additional suggestions]
-```
-
-If no issues: Output "PLAN APPROVED" with brief explanation of why it's sound.
+    Review this plan following your guidelines. Verify all claims against the actual codebase.
+    Output a numbered list of findings with: plan reference, category, evidence, and suggestion.
 ```
 
 ## Output
