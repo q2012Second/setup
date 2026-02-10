@@ -21,56 +21,50 @@ flowchart TD
 
     P15 --> P2
 
-    subgraph "Phase 2 — Context"
-        P2[Explore Agent<br><i>find relevant files</i>] --> P25[Context-Loader<br><i>trim & extract</i>]
-    end
-
-    P25 --> P3
-
-    subgraph "Phase 3 — Planning"
-        P3[Planner] --> P3R{Plan-Reviewer}
-        P3R -->|Needs Revision| P3
-        P3R -->|Approved| EXT
+    subgraph "Phase 2 — Planning"
+        P2[Planner<br><i>explores codebase</i>] --> P2R{Plan-Reviewer}
+        P2R -->|Needs Revision| P2
+        P2R -->|Approved| EXT
 
         EXT[Chat-Preparer<br><i>generate prompt</i>] --> USER2{User sends to<br>external LLM}
         USER2 --> ANAL[Planner<br><i>analyze external review</i>]
-        ANAL --> P3R2{Plan-Reviewer}
-        P3R2 -->|Needs Revision| P3
-        P3R2 -->|Approved| USER3{User Approval}
+        ANAL --> P2R2{Plan-Reviewer}
+        P2R2 -->|Needs Revision| P2
+        P2R2 -->|Approved| USER3{User Approval}
     end
 
-    USER3 -->|Approved| P35
+    USER3 -->|Approved| P25
 
-    subgraph "Phase 3.5+ — Pre-Implementation"
-        P35[Validator<br><i>baseline check</i>] --> P37[Test-Designer<br><i>from plan</i>]
+    subgraph "Phase 2.5+ — Pre-Implementation"
+        P25[Validator<br><i>baseline check</i>] --> P27[Test-Designer<br><i>from plan</i>]
     end
 
-    P37 --> P4
+    P27 --> P3
 
-    subgraph "Phase 4 — Implementation"
-        P4[Implement plan steps] --> TESTS[Test-Writer]
+    subgraph "Phase 3 — Implementation"
+        P3[Implement plan steps] --> TESTS[Test-Writer]
     end
 
-    TESTS --> P5
+    TESTS --> P4
 
-    subgraph "Phase 5 — Code Quality"
-        P5[Code-Reviewer] -->|Issues found| FIX[Fix issues] --> P5
-        P5 -->|Clean| DONE5[✓]
+    subgraph "Phase 4 — Code Quality"
+        P4[Code-Reviewer] -->|Issues found| FIX[Fix issues] --> P4
+        P4 -->|Clean| DONE4[✓]
     end
 
-    DONE5 --> P6
+    DONE4 --> P5
 
-    subgraph "Phase 6 — Verification"
-        P6[Validator<br><i>final check</i>] --> P6G[Code-Goal<br><i>requirements met?</i>]
+    subgraph "Phase 5 — Verification"
+        P5[Validator<br><i>final check</i>] --> P5G[Code-Goal<br><i>requirements met?</i>]
     end
 
-    P6G --> P7
+    P5G --> P6
 
-    subgraph "Phase 7 — Summary"
-        P7[Generate summary.md]
+    subgraph "Phase 6 — Summary"
+        P6[Generate summary.md]
     end
 
-    P7 --> END([Done])
+    P6 --> END([Done])
 
     style START fill:#4a9eff,color:#fff
     style END fill:#22c55e,color:#fff
@@ -85,7 +79,6 @@ flowchart TD
 |-------|-------|---------|
 | Problem-Analyst | sonnet | Clarify problem, define acceptance criteria |
 | Test-Designer | opus | Design test cases from requirements and plan |
-| Context-Loader | sonnet | Read files, trim to relevant content |
 | Planner | opus | Create and revise implementation plans |
 | Plan-Reviewer | opus | Review plans for gaps and issues |
 | Chat-Preparer | sonnet | Prepare prompts for external LLM review |

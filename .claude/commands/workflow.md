@@ -27,41 +27,39 @@ $ARGUMENTS
 
 ## Output Files
 - `problem.md` - Problem statement (Phase 1)
-- `plan.md` - Implementation plan, always the current version (Phase 3)
-- `plan-review.md` - Latest plan review feedback (Phase 3)
-- `external-review.md` - External LLM review feedback (Phase 3)
-- `external-analysis.md` - Analysis of external review findings with VALID/INVALID/OVERENGINEERED classifications (Phase 3)
-- `chat-prompt.md` - Prompt for external chat (Phase 3)
-- `chat-context.txt` - Code context for external chat (Phase 3)
-- `chat-combined.md` - Combined prompt + instructions (Phase 3)
+- `plan.md` - Implementation plan, always the current version (Phase 2)
+- `plan-review.md` - Latest plan review feedback (Phase 2)
+- `external-review.md` - External LLM review feedback (Phase 2)
+- `external-analysis.md` - Analysis of external review findings with VALID/INVALID/OVERENGINEERED classifications (Phase 2)
+- `chat-prompt.md` - Prompt for external chat (Phase 2)
+- `chat-context.txt` - Code context for external chat (Phase 2)
+- `chat-combined.md` - Combined prompt + instructions (Phase 2)
 - `test-design-requirements.md` - Test cases from requirements (Phase 1.5)
-- `test-design-plan.md` - Test cases from plan, including gap-exposing tests (Phase 3.7)
+- `test-design-plan.md` - Test cases from plan, including gap-exposing tests (Phase 2.7)
 - `state.json` - Checkpoint state for resume capability
-- `baseline-validation.md` - Pre-implementation validation (Phase 3.5)
-- `code-review.md` - Bug/vulnerability findings (Phase 5)
-- `final-validation.md` - Final tests/linter results (Phase 6)
-- `verification.md` - Goal verification (Phase 6)
-- `summary.md` - Final summary (Phase 7)
+- `baseline-validation.md` - Pre-implementation validation (Phase 2.5)
+- `code-review.md` - Bug/vulnerability findings (Phase 4)
+- `final-validation.md` - Final tests/linter results (Phase 5)
+- `verification.md` - Goal verification (Phase 5)
+- `summary.md` - Final summary (Phase 6)
 
 ---
 
 ## CRITICAL: Context Management Rules
 
-**Principle:** Minimize main agent context by delegating exploratory work to subagents.
+**Principle:** Minimize main agent context by delegating exploratory work to subagents. Each subagent searches for its own context — no centralized context gathering.
 
 | Phase | Main Agent Reads Files? | Why |
 |-------|------------------------|-----|
 | 1. Problem | NO | Problem-Analyst subagent explores |
 | 1.5. Test Design (requirements) | NO | Test-Designer subagent designs tests from requirements |
-| 2. Context Gathering | NO | Explore subagent returns file list only |
-| 2.5. Context Loading | NO | Context-Loader returns trimmed content |
-| 3. Iterative Planning | NO (reads task dir files only) | Planner/Reviewer subagents iterate; external review via prepare-chat |
-| 3.5. Pre-Implementation | NO | Validator subagent runs commands |
-| 3.7. Test Design (plan) | NO | Test-Designer subagent extends test list from plan |
-| 4. Implementation | YES (only files being edited) | Need line numbers for Edit tool |
-| 5. Code Quality | NO | Pass diff to reviewers, receive issues |
-| 6. Verification | NO | Validator + Code-Goal subagents |
-| 7. Final Review | NO | Use git diff for summary |
+| 2. Iterative Planning | NO (reads task dir files only) | Planner/Reviewer subagents explore codebase themselves |
+| 2.5. Pre-Implementation | NO | Validator subagent runs commands |
+| 2.7. Test Design (plan) | NO | Test-Designer subagent extends test list from plan |
+| 3. Implementation | YES (only files being edited) | Need line numbers for Edit tool |
+| 4. Code Quality | NO | Pass diff to reviewers, receive issues |
+| 5. Verification | NO | Validator + Code-Goal subagents |
+| 6. Final Review | NO | Use git diff for summary |
 
 ---
 
@@ -95,31 +93,7 @@ After user approves the problem statement, design tests based purely on requirem
 
 ---
 
-## Phase 2: Context Gathering
-
-**Context Rule:** Do NOT read any files. Only spawn Explore subagent.
-
-1. Spawn **Explore subagent** (Task tool, subagent_type="Explore") with problem description
-2. Receive file list (NOT file contents)
-3. **Save checkpoint**
-4. Pass file list to Phase 2.5
-
----
-
-## Phase 2.5: Context Loading
-
-**Context Rule:** Do NOT read any files. Context-Loader reads and returns trimmed content.
-
-1. Spawn **Context-Loader subagent** (Task tool, model=sonnet) with:
-   - Problem statement
-   - File list from Phase 2
-2. Receive trimmed context (FULL/EXCERPT/SKIP per file)
-3. **Save checkpoint**
-4. Pass trimmed context to Phase 3
-
----
-
-## Phase 3: Iterative Planning
+## Phase 2: Iterative Planning
 
 **Context Rule:** Do NOT read source code files. Read/write task directory files only (`plan.md`, `plan-review.md`, etc.). All codebase exploration via subagents.
 
@@ -146,7 +120,7 @@ Both Planner and Plan-Reviewer may surface **Questions for the User** in their o
 
 1. Spawn **Planner subagent** (Task tool, model=opus, creation mode) with:
    - Problem statement
-   - Trimmed context (in prompt, NOT re-read)
+   - Instruction to explore the codebase for relevant context
 2. Write plan to `tasks/<task-name>/plan.md`
 3. **Check for questions** → ask user if any, then spawn Planner (revision mode) with answers to update plan
 4. **Save checkpoint**
@@ -246,12 +220,12 @@ Repeat until Plan-Reviewer returns **PLAN APPROVED**:
    Please review the final plan in `tasks/<task-name>/plan.md`.
    ```
 2. **STOP and wait for user approval**
-3. If user approves → proceed to Phase 3.5
+3. If user approves → proceed to Phase 2.5
 4. If user requests changes → Spawn Planner (revision mode) with user feedback, then go back to **Step 2**
 
 ---
 
-## Phase 3.5: Pre-Implementation Validation
+## Phase 2.5: Pre-Implementation Validation
 
 **Context Rule:** Do NOT run validation commands directly. Delegate to Validator subagent.
 
@@ -262,11 +236,11 @@ Repeat until Plan-Reviewer returns **PLAN APPROVED**:
 2. Receive validation verdict (NOT raw command output)
 3. Write to `tasks/<task-name>/baseline-validation.md`
 4. If BLOCKED: Stop and report to user
-5. If PASS: **Save checkpoint**, continue to Phase 3.7
+5. If PASS: **Save checkpoint**, continue to Phase 2.7
 
 ---
 
-## Phase 3.7: Plan-Based Test Design
+## Phase 2.7: Plan-Based Test Design
 
 **Context Rule:** Do NOT read source files. Delegate to Test-Designer subagent.
 
@@ -283,13 +257,13 @@ After pre-implementation validation passes, extend the test list with plan-speci
    - Check plan-based tests don't duplicate requirements-based tests
 3. Write to `tasks/<task-name>/test-design-plan.md`
 4. **Save checkpoint**
-5. Continue to Phase 4
+5. Continue to Phase 3
 
 **Note:** Skip if Phase 1.5 was skipped (trivial task with no tests needed).
 
 ---
 
-## Phase 4: Implementation
+## Phase 3: Implementation
 
 **Context Rule:** This is the ONLY phase where main agent reads files - and ONLY files being edited.
 
@@ -315,7 +289,7 @@ After pre-implementation validation passes, extend the test list with plan-speci
 
 ---
 
-## Phase 5: Code Quality
+## Phase 4: Code Quality
 
 **Context Rule:** Do NOT read source files except those being fixed. Pass diff to subagents, receive issue lists.
 
@@ -335,7 +309,7 @@ Repeat until Code-Reviewer returns **NO ISSUES FOUND** or only Low-severity issu
 
 ---
 
-## Phase 6: Verification
+## Phase 5: Verification
 
 **Context Rule:** Do NOT read files or run tests directly. Delegate to subagents.
 
@@ -353,7 +327,7 @@ Repeat until Code-Reviewer returns **NO ISSUES FOUND** or only Low-severity issu
 
 ---
 
-## Phase 7: Final Review
+## Phase 6: Final Review
 
 **Context Rule:** Do NOT read files. Use git diff and previous phase outputs.
 
