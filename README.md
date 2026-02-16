@@ -22,15 +22,19 @@ flowchart TD
     P15 --> P2
 
     subgraph "Phase 2 — Planning"
-        P2[Planner<br><i>explores codebase</i>] --> P2R{Plan-Reviewer}
+        P2[Planner<br><i>explores codebase</i>] --> CDX["Codex (read-only sandbox)<br><i>verify plan vs codebase</i>"]
+        CDX --> TRIAGE1[Main Agent<br><i>triage Codex findings</i>]
+        TRIAGE1 --> P2R{Plan-Reviewer}
+        P2R -->|Both approve| EXT
         P2R -->|Needs Revision| P2
-        P2R -->|Approved| EXT
 
         EXT[Chat-Preparer<br><i>generate prompt</i>] --> USER2{User sends to<br>external LLM}
         USER2 --> ANAL[Planner<br><i>analyze external review</i>]
-        ANAL --> P2R2{Plan-Reviewer}
+        ANAL --> CDX2["Codex (read-only sandbox)"]
+        CDX2 --> TRIAGE2[Main Agent<br><i>triage Codex findings</i>]
+        TRIAGE2 --> P2R2{Plan-Reviewer}
+        P2R2 -->|Both approve| USER3{User Approval}
         P2R2 -->|Needs Revision| P2
-        P2R2 -->|Approved| USER3{User Approval}
     end
 
     USER3 -->|Approved| P25
@@ -48,8 +52,10 @@ flowchart TD
     TESTS --> P4
 
     subgraph "Phase 4 — Code Quality"
-        P4[Code-Reviewer] -->|Issues found| FIX[Fix issues] --> P4
-        P4 -->|Clean| DONE4[✓]
+        P4CDX["Codex (read-only sandbox)<br><i>review changes</i>"] --> P4TRI[Main Agent<br><i>triage Codex findings</i>]
+        P4TRI --> P4CR[Code-Reviewer]
+        P4CR -->|Issues found| FIX[Fix issues] --> P4CDX
+        P4CR -->|Clean| DONE4[✓]
     end
 
     DONE4 --> P5
@@ -81,6 +87,7 @@ flowchart TD
 | Test-Designer | opus | Design test cases from requirements and plan |
 | Planner | opus | Create and revise implementation plans |
 | Plan-Reviewer | opus | Review plans for gaps and issues |
+| Codex | gpt-5.3-codex | Verify plans/code against codebase in read-only sandbox |
 | Chat-Preparer | sonnet | Prepare prompts for external LLM review |
 | Validator | sonnet | Run tests, linters, type checks |
 | Test-Writer | sonnet | Write tests following project conventions |
@@ -97,7 +104,7 @@ flowchart TD
 | `/workflow` | Full structured workflow (diagram above) |
 | `/plan` | Create implementation plan only |
 | `/review-plan` | Review an existing plan |
-| `/review-code` | Review code for bugs and vulnerabilities |
+| `/review-code` | Review code using Codex + Code-Reviewer |
 | `/verify` | Verify implementation matches requirements |
 | `/gather-context` | Find relevant files for a task |
 | `/prepare-chat` | Prepare prompt for external LLM |

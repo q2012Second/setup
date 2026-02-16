@@ -29,6 +29,8 @@ $ARGUMENTS
 - `problem.md` - Problem statement (Phase 1)
 - `plan.md` - Implementation plan, always the current version (Phase 2)
 - `plan-review.md` - Latest plan review feedback (Phase 2)
+- `codex-plan-review-N.md` - Raw Codex plan review output per review iteration (Phase 2)
+- `codex-plan-analysis-N.md` - Analysis of Codex findings with VALID/INVALID/OVERENGINEERED classifications (Phase 2)
 - `external-review.md` - External LLM review feedback (Phase 2)
 - `external-analysis.md` - Analysis of external review findings with VALID/INVALID/OVERENGINEERED classifications (Phase 2)
 - `chat-prompt.md` - Prompt for external chat (Phase 2)
@@ -39,6 +41,8 @@ $ARGUMENTS
 - `state.json` - Checkpoint state for resume capability
 - `baseline-validation.md` - Pre-implementation validation (Phase 2.5)
 - `code-review.md` - Bug/vulnerability findings (Phase 4)
+- `codex-code-review-N.md` - Raw Codex code review output per review iteration (Phase 4)
+- `codex-code-analysis-N.md` - Analysis of Codex code review findings with VALID/INVALID/OVERENGINEERED classifications (Phase 4)
 - `final-validation.md` - Final tests/linter results (Phase 5)
 - `verification.md` - Goal verification (Phase 5)
 - `summary.md` - Final summary (Phase 6)
@@ -53,11 +57,11 @@ $ARGUMENTS
 |-------|------------------------|-----|
 | 1. Problem | NO | Problem-Analyst subagent explores |
 | 1.5. Test Design (requirements) | NO | Test-Designer subagent designs tests from requirements |
-| 2. Iterative Planning | NO (reads task dir files only) | Planner/Reviewer subagents explore codebase themselves |
+| 2. Iterative Planning | NO (reads task dir files only) | Planner/Reviewer subagents explore codebase; Codex reviews in read-only sandbox |
 | 2.5. Pre-Implementation | NO | Validator subagent runs commands |
 | 2.7. Test Design (plan) | NO | Test-Designer subagent extends test list from plan |
 | 3. Implementation | YES (only files being edited) | Need line numbers for Edit tool |
-| 4. Code Quality | NO | Pass diff to reviewers, receive issues |
+| 4. Code Quality | NO (except files being fixed) | Codex reviews in read-only sandbox; Code-Reviewer subagent receives diff + Codex findings |
 | 5. Verification | NO | Validator + Code-Goal subagents |
 | 6. Final Review | NO | Use git diff for summary |
 
@@ -98,9 +102,9 @@ After user approves the problem statement, design tests based purely on requirem
 **Context Rule:** Do NOT read source code files. Read/write task directory files only (`plan.md`, `plan-review.md`, etc.). All codebase exploration via subagents.
 
 This phase runs a full planning cycle with iterative refinement:
-1. Internal plan-review loop (Planner + Plan-Reviewer iterate until agreement)
+1. Internal plan-review loop (Codex review → Plan-Reviewer review → Planner revision, iterate until both approve)
 2. External review (prepare-chat → user gets external feedback)
-3. External review analysis + another plan-review loop
+3. External review analysis + another plan-review loop (with Codex)
 4. User manual review
 
 ---
@@ -127,22 +131,88 @@ Both Planner and Plan-Reviewer may surface **Questions for the User** in their o
 
 ### Step 2: Internal Plan-Review Loop
 
-Repeat until Plan-Reviewer returns **PLAN APPROVED**:
+Track **REVIEW_ITERATION = 1**. Repeat until both Codex and Plan-Reviewer approve:
 
-1. Spawn **Plan-Reviewer subagent** (Task tool, model=opus) with current plan
+#### 2a. Codex Plan Review (mandatory)
+
+Run Codex in read-only sandbox to review the plan against the actual codebase:
+
+```bash
+codex exec --sandbox read-only -m gpt-5.3-codex \
+  -o tasks/<task-name>/codex-plan-review-REVIEW_ITERATION.md \
+  "<codex-prompt>"
+```
+
+**Codex prompt** (substitute actual content from `problem.md` and `plan.md`):
+
+```
+You are reviewing an implementation plan for production readiness. Your job is to find real problems — be thorough and critical.
+
+PROBLEM STATEMENT:
+<content of problem.md>
+
+IMPLEMENTATION PLAN:
+<content of plan.md>
+
+Read the plan above, then explore the actual codebase to verify the plan's assumptions. For each issue found, evaluate against these criteria:
+
+1. FEASIBILITY: Can this plan actually be implemented against the current codebase? Are file paths, function names, class structures, and APIs correct?
+2. MISSING STEPS: Are there steps the plan omits that are necessary for a working implementation? Missing migrations, config changes, import updates, dependency installs?
+3. WRONG ASSUMPTIONS: Does the plan assume things about the codebase that aren't true? Wrong file locations, non-existent functions, incorrect signatures?
+4. ORDERING: Are the steps in the right order? Will earlier steps break things that later steps depend on?
+5. EDGE CASES: Does the plan miss error handling, boundary conditions, or failure modes that the codebase already handles elsewhere?
+6. OVER-ENGINEERING: Does the plan introduce unnecessary complexity, abstractions, or indirection?
+7. BACKWARD COMPATIBILITY: Will the plan break existing callers, APIs, tests, or data formats?
+8. SECURITY: Does the plan introduce any security vulnerabilities?
+
+Format your response as a numbered list of findings. For each finding:
+- Which plan step it refers to
+- Severity: CRITICAL (blocks implementation) / HIGH (will cause bugs) / MEDIUM (should fix) / LOW (nice to have)
+- Category (from the list above)
+- Specific evidence from the codebase (file paths, line numbers, code snippets you found)
+- A concrete suggestion for how to fix the plan
+
+End your response with exactly one of:
+- **PLAN APPROVED** — if no CRITICAL or HIGH findings
+- **NEEDS REVISION** — if any CRITICAL or HIGH findings exist
+```
+
+**Bash timeout: 600000ms (10 min).** If it times out, retry once.
+
+#### 2b. Analyze Codex Findings
+
+Read `tasks/<task-name>/codex-plan-review-REVIEW_ITERATION.md` and analyze each finding:
+
+1. For each finding, do a quick verification against the codebase (use Grep/Glob — do NOT read full files)
+2. Classify each finding as:
+   - **VALID** — Correct, the plan should change. Preserve severity.
+   - **INVALID** — Incorrect. State why with brief evidence.
+   - **OVERENGINEERED** — Suggests unnecessary complexity. State why current plan is sufficient.
+3. Write analysis to `tasks/<task-name>/codex-plan-analysis-REVIEW_ITERATION.md`
+
+#### 2c. Plan-Reviewer Review
+
+1. Spawn **Plan-Reviewer subagent** (Task tool, model=opus) with:
+   - Current plan
+   - Codex findings + classifications from step 2b (include the full analysis so reviewer can agree/disagree)
 2. Write review to `tasks/<task-name>/plan-review.md`
 3. **Check for reviewer questions** → ask user if any
-4. If **PLAN APPROVED** → proceed to Step 3
-5. If **NEEDS REVISION**:
+
+#### 2d. Convergence Check
+
+- If both Codex (step 2a) and Plan-Reviewer (step 2c) returned **PLAN APPROVED** → proceed to Step 3
+- If either returned **NEEDS REVISION**:
    a. Spawn **Planner subagent** (revision mode) with:
       - Current plan
-      - Review findings
+      - Codex findings + classifications (from step 2b)
+      - Plan-Reviewer findings (from step 2c)
       - Any user answers to questions
       - Problem statement
    b. Planner verifies each finding, incorporates valid ones, rejects others with reasoning in Review Addendum
    c. Update `tasks/<task-name>/plan.md`
    d. **Check for planner questions** → ask user if any, re-run planner with answers
-   e. Go back to step 1 of this loop
+   e. Increment REVIEW_ITERATION
+   f. Go back to step 2a
 
 6. **Save checkpoint**
 
@@ -194,17 +264,47 @@ When user says **"continue workflow"** after external review:
 
 ### Step 5: Post-External Plan-Review Loop
 
-Repeat until Plan-Reviewer returns **PLAN APPROVED**:
+Track **REVIEW_ITERATION** (continue from Step 2's counter). Repeat until both Codex and Plan-Reviewer approve:
 
-1. Spawn **Plan-Reviewer subagent** (Task tool, model=opus) with updated plan
+#### 5a. Codex Plan Review (mandatory)
+
+Same process as Step 2a — run Codex in read-only sandbox with the updated plan:
+
+```bash
+codex exec --sandbox read-only -m gpt-5.3-codex \
+  -o tasks/<task-name>/codex-plan-review-REVIEW_ITERATION.md \
+  "<codex-prompt>"
+```
+
+Use the same Codex prompt template from Step 2a with current `problem.md` and `plan.md` content.
+
+**Bash timeout: 600000ms (10 min).** If it times out, retry once.
+
+#### 5b. Analyze Codex Findings
+
+Same process as Step 2b — verify and classify each finding. Write to `tasks/<task-name>/codex-plan-analysis-REVIEW_ITERATION.md`.
+
+#### 5c. Plan-Reviewer Review
+
+1. Spawn **Plan-Reviewer subagent** (Task tool, model=opus) with:
+   - Updated plan
+   - Codex findings + classifications from step 5b
 2. Write review to `tasks/<task-name>/plan-review.md` (overwrite)
 3. **Check for reviewer questions** → ask user if any
-4. If **PLAN APPROVED** → proceed to Step 6
-5. If **NEEDS REVISION**:
-   a. Spawn **Planner subagent** (revision mode) with findings + user answers
+
+#### 5d. Convergence Check
+
+- If both Codex (step 5a) and Plan-Reviewer (step 5c) returned **PLAN APPROVED** → proceed to Step 6
+- If either returned **NEEDS REVISION**:
+   a. Spawn **Planner subagent** (revision mode) with:
+      - Current plan
+      - Codex findings + classifications (from step 5b)
+      - Plan-Reviewer findings (from step 5c)
+      - Any user answers to questions
    b. Update `tasks/<task-name>/plan.md`
    c. **Check for planner questions** → ask user if any
-   d. Go back to step 1 of this loop
+   d. Increment REVIEW_ITERATION
+   e. Go back to step 5a
 
 6. **Save checkpoint**
 
@@ -213,11 +313,12 @@ Repeat until Plan-Reviewer returns **PLAN APPROVED**:
 1. Present the final plan to the user with a summary:
    ```
    Planning iteration complete:
-   - Internal review loop: N rounds
+   - Internal review loop: N rounds (Codex + Plan-Reviewer each round)
    - External review: X findings (Y valid, Z rejected)
-   - Post-external review loop: M rounds
+   - Post-external review loop: M rounds (Codex + Plan-Reviewer each round)
 
    Please review the final plan in `tasks/<task-name>/plan.md`.
+   All Codex reviews: codex-plan-review-*.md / codex-plan-analysis-*.md
    ```
 2. **STOP and wait for user approval**
 3. If user approves → proceed to Phase 2.5
@@ -291,19 +392,88 @@ After pre-implementation validation passes, extend the test list with plan-speci
 
 ## Phase 4: Code Quality
 
-**Context Rule:** Do NOT read source files except those being fixed. Pass diff to subagents, receive issue lists.
+**Context Rule:** Do NOT read source files except those being fixed. Pass diff to subagents, receive issue lists. Codex reviews in its own read-only sandbox.
 
-### Code Review Loop:
+Track **CODE_REVIEW_ITERATION = 1**. Repeat until both Codex and Code-Reviewer agree no Critical/High/Medium issues remain:
 
-Repeat until Code-Reviewer returns **NO ISSUES FOUND** or only Low-severity issues remain:
+### 4a. Generate Diff
 
-1. Generate diff: `git diff`
-2. Spawn **Code-Reviewer subagent** (Task tool, model=opus) with diff
-3. Write to `tasks/<task-name>/code-review.md`
-4. If **Critical, High, or Medium** issues found:
-   a. Fix issues (read only files being modified)
-   b. Go back to step 1
-5. If only **Low** or **NO ISSUES FOUND** → done
+```bash
+git diff > tasks/<task-name>/diff.patch
+```
+
+Save the diff for both reviewers to reference.
+
+### 4b. Codex Code Review (mandatory)
+
+Run Codex `review` command against the uncommitted changes:
+
+```bash
+codex review --uncommitted -m gpt-5.3-codex \
+  -o tasks/<task-name>/codex-code-review-CODE_REVIEW_ITERATION.md \
+  "<codex-review-prompt>"
+```
+
+**Codex review prompt** (substitute actual values):
+
+```
+Review these code changes for production readiness. Be thorough and critical.
+
+TASK CONTEXT:
+This code implements the plan described in tasks/<task-name>/plan.md for the problem in tasks/<task-name>/problem.md. Read both files for context.
+
+Review the changes against the ACTUAL CODEBASE for:
+
+1. SECURITY: SQL injection, XSS, command injection, auth bypass, secrets exposure, CSRF, insecure deserialization, SSRF, or any OWASP Top 10 vulnerability?
+2. BUGS: Logic errors, off-by-one, null/undefined handling, race conditions, deadlocks, resource leaks, incorrect error handling?
+3. BACKWARD COMPATIBILITY: Does this break existing API contracts, database schemas, message formats, or client expectations? Are migrations needed?
+4. ACCURACY: Does the code correctly implement the stated intent? Wrong function calls, incorrect parameters, misunderstandings of the codebase?
+5. OVER-ENGINEERING: Unnecessary abstractions, premature optimizations, feature flags, or complexity not justified by requirements?
+6. EDGE CASES: Unhandled error paths, boundary conditions, empty/null inputs, timeout scenarios, concurrent access?
+7. TESTING: Are changes adequately tested? Missing test cases for new behavior or edge cases?
+8. PERFORMANCE: N+1 queries, missing indexes, unbounded loops, memory leaks, expensive operations in hot paths?
+
+Format your response as a numbered list of findings. For each finding:
+- File and lines it refers to
+- Severity: CRITICAL (must fix before prod) / HIGH (should fix) / MEDIUM (recommended) / LOW (nice to have)
+- Category (from the list above)
+- Specific evidence from the codebase (file paths, line numbers, code snippets)
+- A concrete suggestion for how to fix it
+
+End with exactly one of:
+- **NO ISSUES FOUND** — if no findings at all
+- **APPROVED** — if no CRITICAL or HIGH findings
+- **NEEDS FIXES** — if any CRITICAL or HIGH findings exist
+```
+
+**Bash timeout: 600000ms (10 min).** If it times out, retry once.
+
+### 4c. Analyze Codex Code Review Findings
+
+Read `tasks/<task-name>/codex-code-review-CODE_REVIEW_ITERATION.md` and analyze each finding:
+
+1. For each finding, do a quick verification against the codebase (use Grep/Glob — do NOT read full files unless fixing)
+2. Classify each finding as:
+   - **VALID** — Correct, the code should change. Preserve severity.
+   - **INVALID** — Incorrect. State why with brief evidence.
+   - **OVERENGINEERED** — Suggests unnecessary complexity. State why current code is sufficient.
+3. Write analysis to `tasks/<task-name>/codex-code-analysis-CODE_REVIEW_ITERATION.md`
+
+### 4d. Code-Reviewer Review
+
+1. Spawn **Code-Reviewer subagent** (Task tool, model=opus) with:
+   - The diff
+   - Codex findings + classifications from step 4c (include the full analysis so reviewer can agree/disagree)
+2. Write review to `tasks/<task-name>/code-review.md`
+
+### 4e. Convergence Check
+
+- If both Codex (step 4b) and Code-Reviewer (step 4d) returned **NO ISSUES FOUND** or **APPROVED** (only Low-severity remain) → done
+- If either returned **NEEDS FIXES** (Critical, High, or Medium issues):
+   a. Collect all VALID findings from both reviews
+   b. Fix issues (read only files being modified)
+   c. Increment CODE_REVIEW_ITERATION
+   d. Go back to step 4a
 
 6. **Save checkpoint**
 
