@@ -22,17 +22,18 @@ flowchart TD
     P15 --> P2
 
     subgraph "Phase 2 — Planning"
-        P2[Planner<br><i>explores codebase</i>] --> CDX["Codex (read-only sandbox)<br><i>verify plan vs codebase</i>"]
-        CDX --> TRIAGE1[Main Agent<br><i>triage Codex findings</i>]
-        TRIAGE1 --> P2R{Plan-Reviewer}
-        P2R -->|Both approve| EXT
+        P2[Planner<br><i>explores codebase</i>] --> CDX["Codex (read-only sandbox)<br><i>1st iteration only</i>"]
+        CDX --> TRIAGE1[Codex-Analyzer<br><i>triage findings</i>]
+        TRIAGE1 -->|VALID only| P2R{Plan-Reviewer}
         P2R -->|Needs Revision| P2
+        P2R -->|Approves| CDXFINAL["Codex (final verification)"]
+        CDXFINAL --> TRIAGE1F[Codex-Analyzer]
+        TRIAGE1F -->|Both approve| EXT
+        TRIAGE1F -->|Disagrees| P2R
 
         EXT[Chat-Preparer<br><i>generate prompt</i>] --> USER2{User sends to<br>external LLM}
         USER2 --> ANAL[Planner<br><i>analyze external review</i>]
-        ANAL --> CDX2["Codex (read-only sandbox)"]
-        CDX2 --> TRIAGE2[Main Agent<br><i>triage Codex findings</i>]
-        TRIAGE2 --> P2R2{Plan-Reviewer}
+        ANAL --> P2R2{Plan-Reviewer<br><i>same pattern</i>}
         P2R2 -->|Both approve| USER3{User Approval}
         P2R2 -->|Needs Revision| P2
     end
@@ -52,8 +53,8 @@ flowchart TD
     TESTS --> P4
 
     subgraph "Phase 4 — Code Quality"
-        P4CDX["Codex (read-only sandbox)<br><i>review changes</i>"] --> P4TRI[Main Agent<br><i>triage Codex findings</i>]
-        P4TRI --> P4CR[Code-Reviewer]
+        P4CDX["Codex (read-only sandbox)<br><i>always enabled</i>"] --> P4TRI[Codex-Analyzer<br><i>triage findings</i>]
+        P4TRI -->|VALID only| P4CR[Code-Reviewer]
         P4CR -->|Issues found| FIX[Fix issues] --> P4CDX
         P4CR -->|Clean| DONE4[✓]
     end
@@ -87,6 +88,7 @@ flowchart TD
 | Code-Goal | sonnet | Verify that implementation solves the original problem |
 | Code-Reviewer | opus | Find bugs, vulnerabilities, performance issues, over-engineering, and style violations in code |
 | Codex | gpt-5.3-codex | Verify plans/code against codebase in read-only sandbox |
+| Codex-Analyzer | sonnet | Triage Codex review findings by verifying each against the codebase and classifying as VALID/INVALID/OVERENGINEERED |
 | Log-Analyzer | sonnet | Analyze logs to detect anomalies, errors, and investigate specific problems |
 | Plan-Reviewer | opus | Review implementation plans from an architecture standpoint |
 | Planner | opus | Create or revise implementation plans from problem statements and codebase context |

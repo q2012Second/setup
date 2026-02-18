@@ -25,6 +25,14 @@ $ARGUMENTS
 
 3. **Initialize state file**: `tasks/<task-name>/state.json`
 
+4. **Codex plan review opt-in**: If the user's task description does NOT explicitly mention "codex", "thorough", or "deep review":
+   - Ask via **AskUserQuestion**: "Use Codex for plan review? (adds a second AI reviewer that scans the full codebase, costs more tokens)"
+     - Option 1: "Yes" — Codex reviews the plan on first and final iteration
+     - Option 2: "No" — Plan-Reviewer only (faster, cheaper)
+   - Store decision in `state.json` as `use_codex_plan_review: true|false`
+   - If the user explicitly mentions codex/thorough/deep review, default to `true` without asking
+   - **Note:** Codex is ALWAYS used for code review (Phase 4) regardless of this setting
+
 ## Output Files
 - `problem.md` - Problem statement (Phase 1)
 - `plan.md` - Implementation plan, always the current version (Phase 2)
@@ -57,11 +65,11 @@ $ARGUMENTS
 |-------|------------------------|-----|
 | 1. Problem | NO | Problem-Analyst subagent explores |
 | 1.5. Test Design (requirements) | NO | Test-Designer subagent designs tests from requirements |
-| 2. Iterative Planning | NO (reads task dir files only) | Planner/Reviewer subagents explore codebase; Codex reviews in read-only sandbox |
+| 2. Iterative Planning | NO (reads task dir files only) | Planner/Reviewer subagents explore codebase; Codex reviews delegated to Codex-Analyzer subagent |
 | 2.5. Pre-Implementation | NO | Validator subagent runs commands |
 | 2.7. Test Design (plan) | NO | Test-Designer subagent extends test list from plan |
 | 3. Implementation | YES (only files being edited) | Need line numbers for Edit tool |
-| 4. Code Quality | NO (except files being fixed) | Codex reviews in read-only sandbox; Code-Reviewer subagent receives diff + Codex findings |
+| 4. Code Quality | NO (except files being fixed) | Codex analysis delegated to Codex-Analyzer subagent; Code-Reviewer receives only VALID findings |
 | 5. Verification | NO | Validator + Code-Goal subagents |
 | 6. Final Review | NO | Use git diff for summary |
 
@@ -99,13 +107,15 @@ After user approves the problem statement, design tests based purely on requirem
 
 ## Phase 2: Iterative Planning
 
-**Context Rule:** Do NOT read source code files. Read/write task directory files only (`plan.md`, `plan-review.md`, etc.). All codebase exploration via subagents.
+**Context Rule:** Do NOT read source code files. Read/write task directory files only (`plan.md`, `plan-review.md`, etc.). All codebase exploration via subagents. Codex analysis delegated to Codex-Analyzer subagent — main agent never reads Codex output files.
 
 This phase runs a full planning cycle with iterative refinement:
-1. Internal plan-review loop (Codex review → Plan-Reviewer review → Planner revision, iterate until both approve)
+1. Internal plan-review loop (Codex on first iteration only → Plan-Reviewer every iteration → final Codex verification)
 2. External review (prepare-chat → user gets external feedback)
-3. External review analysis + another plan-review loop (with Codex)
+3. External review analysis + another plan-review loop (same pattern)
 4. User manual review
+
+**Codex gate:** Check `state.json` → `use_codex_plan_review`. If `false`, skip all Codex steps in this phase (2a/2b become no-ops, convergence depends on Plan-Reviewer only).
 
 ---
 
@@ -131,9 +141,11 @@ Both Planner and Plan-Reviewer may surface **Questions for the User** in their o
 
 ### Step 2: Internal Plan-Review Loop
 
-Track **REVIEW_ITERATION = 1**. Repeat until both Codex and Plan-Reviewer approve:
+Track **REVIEW_ITERATION = 1**. Track **CODEX_LAST_VERDICT = null**.
 
-#### 2a. Codex Plan Review (mandatory)
+#### 2a. Codex Plan Review (first iteration only)
+
+**Skip this step if `use_codex_plan_review` is false, or if REVIEW_ITERATION > 1.**
 
 Run Codex in read-only sandbox to review the plan against the actual codebase.
 
@@ -143,40 +155,65 @@ Use the `review_plan` MCP tool with:
 - output_file: "tasks/<task-name>/codex-plan-review-REVIEW_ITERATION.md"
 - working_directory: project root path
 
-#### 2b. Analyze Codex Findings
+#### 2b. Analyze Codex Findings (via subagent)
 
-Read `tasks/<task-name>/codex-plan-review-REVIEW_ITERATION.md` and analyze each finding:
+**Skip if step 2a was skipped.**
 
-1. For each finding, do a quick verification against the codebase (use Grep/Glob — do NOT read full files)
-2. Classify each finding as:
-   - **VALID** — Correct, the plan should change. Preserve severity.
-   - **INVALID** — Incorrect. State why with brief evidence.
-   - **OVERENGINEERED** — Suggests unnecessary complexity. State why current plan is sufficient.
-3. Write analysis to `tasks/<task-name>/codex-plan-analysis-REVIEW_ITERATION.md`
+Spawn **Codex-Analyzer subagent** (Task tool, model=sonnet) with:
+- Codex review file path: `tasks/<task-name>/codex-plan-review-REVIEW_ITERATION.md`
+- Analysis output path: `tasks/<task-name>/codex-plan-analysis-REVIEW_ITERATION.md`
+- Review type: "plan"
+
+Receive back: **CODEX_LAST_VERDICT** and **VALID findings only** (not the full analysis). Store the verdict.
+
+**Main agent does NOT read the Codex output or analysis files.**
 
 #### 2c. Plan-Reviewer Review
 
 1. Spawn **Plan-Reviewer subagent** (Task tool, model=opus) with:
    - Current plan
-   - Codex findings + classifications from step 2b (include the full analysis so reviewer can agree/disagree)
+   - If Codex ran this iteration: VALID findings only from step 2b (the summary returned by Codex-Analyzer)
+   - If Codex did not run: no Codex findings
 2. Write review to `tasks/<task-name>/plan-review.md`
 3. **Check for reviewer questions** → ask user if any
 
 #### 2d. Convergence Check
 
-- If both Codex (step 2a) and Plan-Reviewer (step 2c) returned **PLAN APPROVED** → proceed to Step 3
-- If either returned **NEEDS REVISION**:
+**If `use_codex_plan_review` is false:**
+- If Plan-Reviewer returned **PLAN APPROVED** → proceed to Step 3
+- If **NEEDS REVISION** → go to revision step below
+
+**If `use_codex_plan_review` is true:**
+- If Plan-Reviewer returned **PLAN APPROVED**:
+  - If REVIEW_ITERATION == 1 and CODEX_LAST_VERDICT was also **PLAN APPROVED** → proceed to Step 3
+  - If REVIEW_ITERATION > 1 (Codex hasn't run since iteration 1) → run **final Codex verification** (step 2e)
+- If Plan-Reviewer returned **NEEDS REVISION** → go to revision step below
+
+**Revision step:**
    a. Spawn **Planner subagent** (revision mode) with:
       - Current plan
-      - Codex findings + classifications (from step 2b)
-      - Plan-Reviewer findings (from step 2c)
+      - VALID Codex findings only (if Codex ran this iteration)
+      - Plan-Reviewer findings
       - Any user answers to questions
       - Problem statement
    b. Planner verifies each finding, incorporates valid ones, rejects others with reasoning in Review Addendum
    c. Update `tasks/<task-name>/plan.md`
    d. **Check for planner questions** → ask user if any, re-run planner with answers
    e. Increment REVIEW_ITERATION
-   f. Go back to step 2a
+   f. Go back to step 2a (which will skip Codex since REVIEW_ITERATION > 1)
+
+#### 2e. Final Codex Verification
+
+Run when Plan-Reviewer has approved but Codex hasn't reviewed the latest plan version.
+
+1. Run `review_plan` MCP tool (same params as 2a, with current REVIEW_ITERATION)
+2. Spawn **Codex-Analyzer subagent** to triage findings (same as 2b)
+3. If Codex verdict is **PLAN APPROVED** → proceed to Step 3
+4. If Codex verdict is **NEEDS REVISION**:
+   - Run ONE more Plan-Reviewer round with the VALID Codex findings
+   - If Plan-Reviewer agrees with Codex → Planner revision, then re-run final Codex verification
+   - If Plan-Reviewer disagrees (still approves) → proceed to Step 3 (Plan-Reviewer overrides on non-critical)
+   - **Cap:** Max 2 final-verification rounds to prevent loops
 
 6. **Save checkpoint**
 
@@ -228,43 +265,38 @@ When user says **"continue workflow"** after external review:
 
 ### Step 5: Post-External Plan-Review Loop
 
-Track **REVIEW_ITERATION** (continue from Step 2's counter). Repeat until both Codex and Plan-Reviewer approve:
+Track **REVIEW_ITERATION** (continue from Step 2's counter). Same Codex-on-first-and-final pattern as Step 2. Track **POST_EXT_ITERATION = 1**.
 
-#### 5a. Codex Plan Review (mandatory)
+**Codex gate:** Same as Step 2 — check `use_codex_plan_review` in state.json.
 
-Same process as Step 2a — run Codex in read-only sandbox with the updated plan.
+#### 5a. Codex Plan Review (first post-external iteration only)
 
-Use the `review_plan` MCP tool with:
-- problem_statement: content of problem.md
-- plan_content: content of plan.md
-- output_file: "tasks/<task-name>/codex-plan-review-REVIEW_ITERATION.md"
-- working_directory: project root path
+**Skip if `use_codex_plan_review` is false, or if POST_EXT_ITERATION > 1.**
 
-#### 5b. Analyze Codex Findings
+Use the `review_plan` MCP tool (same params as Step 2a, with current REVIEW_ITERATION).
 
-Same process as Step 2b — verify and classify each finding. Write to `tasks/<task-name>/codex-plan-analysis-REVIEW_ITERATION.md`.
+#### 5b. Analyze Codex Findings (via subagent)
+
+**Skip if 5a was skipped.**
+
+Spawn **Codex-Analyzer subagent** (model=sonnet). Receive VALID findings only. Store Codex verdict.
+
+**Main agent does NOT read Codex output or analysis files.**
 
 #### 5c. Plan-Reviewer Review
 
 1. Spawn **Plan-Reviewer subagent** (Task tool, model=opus) with:
    - Updated plan
-   - Codex findings + classifications from step 5b
+   - If Codex ran this iteration: VALID findings only from step 5b
 2. Write review to `tasks/<task-name>/plan-review.md` (overwrite)
 3. **Check for reviewer questions** → ask user if any
 
 #### 5d. Convergence Check
 
-- If both Codex (step 5a) and Plan-Reviewer (step 5c) returned **PLAN APPROVED** → proceed to Step 6
-- If either returned **NEEDS REVISION**:
-   a. Spawn **Planner subagent** (revision mode) with:
-      - Current plan
-      - Codex findings + classifications (from step 5b)
-      - Plan-Reviewer findings (from step 5c)
-      - Any user answers to questions
-   b. Update `tasks/<task-name>/plan.md`
-   c. **Check for planner questions** → ask user if any
-   d. Increment REVIEW_ITERATION
-   e. Go back to step 5a
+Same logic as Step 2d:
+- If `use_codex_plan_review` is false: Plan-Reviewer approval alone is sufficient
+- If true: When Plan-Reviewer approves and Codex hasn't run recently → final Codex verification (same as step 2e)
+- If NEEDS REVISION: Planner revision with VALID findings only, increment POST_EXT_ITERATION, go to 5a
 
 6. **Save checkpoint**
 
@@ -273,12 +305,13 @@ Same process as Step 2b — verify and classify each finding. Write to `tasks/<t
 1. Present the final plan to the user with a summary:
    ```
    Planning iteration complete:
-   - Internal review loop: N rounds (Codex + Plan-Reviewer each round)
+   - Codex plan review: [enabled/disabled]
+   - Internal review loop: N rounds (Plan-Reviewer each round, Codex on first + final)
    - External review: X findings (Y valid, Z rejected)
-   - Post-external review loop: M rounds (Codex + Plan-Reviewer each round)
+   - Post-external review loop: M rounds (same pattern)
 
    Please review the final plan in `tasks/<task-name>/plan.md`.
-   All Codex reviews: codex-plan-review-*.md / codex-plan-analysis-*.md
+   Codex reviews (if enabled): codex-plan-review-*.md / codex-plan-analysis-*.md
    ```
 2. **STOP and wait for user approval**
 3. If user approves → proceed to Phase 2.5
@@ -352,7 +385,9 @@ After pre-implementation validation passes, extend the test list with plan-speci
 
 ## Phase 4: Code Quality
 
-**Context Rule:** Do NOT read source files except those being fixed. Pass diff to subagents, receive issue lists. Codex reviews in its own read-only sandbox.
+**Context Rule:** Do NOT read source files except those being fixed. Codex analysis delegated to Codex-Analyzer subagent — main agent never reads Codex output. Only VALID findings are passed to Code-Reviewer.
+
+**Codex is ALWAYS used for code review** regardless of the `use_codex_plan_review` setting.
 
 Track **CODE_REVIEW_ITERATION = 1**. Repeat until both Codex and Code-Reviewer agree no Critical/High/Medium issues remain:
 
@@ -364,7 +399,7 @@ git diff > tasks/<task-name>/diff.patch
 
 Save the diff for both reviewers to reference.
 
-### 4b. Codex Code Review (mandatory)
+### 4b. Codex Code Review (mandatory, every iteration)
 
 Run Codex code review against the uncommitted changes.
 
@@ -374,27 +409,27 @@ Use the `review_code` MCP tool with:
 - uncommitted: true
 - working_directory: project root path
 
-### 4c. Analyze Codex Code Review Findings
+### 4c. Analyze Codex Code Review Findings (via subagent)
 
-Read `tasks/<task-name>/codex-code-review-CODE_REVIEW_ITERATION.md` and analyze each finding:
+Spawn **Codex-Analyzer subagent** (Task tool, model=sonnet) with:
+- Codex review file path: `tasks/<task-name>/codex-code-review-CODE_REVIEW_ITERATION.md`
+- Analysis output path: `tasks/<task-name>/codex-code-analysis-CODE_REVIEW_ITERATION.md`
+- Review type: "code"
 
-1. For each finding, do a quick verification against the codebase (use Grep/Glob — do NOT read full files unless fixing)
-2. Classify each finding as:
-   - **VALID** — Correct, the code should change. Preserve severity.
-   - **INVALID** — Incorrect. State why with brief evidence.
-   - **OVERENGINEERED** — Suggests unnecessary complexity. State why current code is sufficient.
-3. Write analysis to `tasks/<task-name>/codex-code-analysis-CODE_REVIEW_ITERATION.md`
+Receive back: **Codex verdict** and **VALID findings only**.
+
+**Main agent does NOT read the Codex output or analysis files.**
 
 ### 4d. Code-Reviewer Review
 
 1. Spawn **Code-Reviewer subagent** (Task tool, model=opus) with:
    - The diff
-   - Codex findings + classifications from step 4c (include the full analysis so reviewer can agree/disagree)
+   - VALID Codex findings only (the summary returned by Codex-Analyzer, NOT the full analysis file)
 2. Write review to `tasks/<task-name>/code-review.md`
 
 ### 4e. Convergence Check
 
-- If both Codex (step 4b) and Code-Reviewer (step 4d) returned **NO ISSUES FOUND** or **APPROVED** (only Low-severity remain) → done
+- If both Codex verdict (from 4c) and Code-Reviewer (step 4d) returned **NO ISSUES FOUND** or **APPROVED** (only Low-severity remain) → done
 - If either returned **NEEDS FIXES** (Critical, High, or Medium issues):
    a. Collect all VALID findings from both reviews
    b. Fix issues (read only files being modified)
