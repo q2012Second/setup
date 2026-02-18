@@ -1,7 +1,7 @@
 ---
 description: Run the full structured workflow for a task (problem clarification, planning, implementation, review, verification)
 argument-hint: [task description]
-allowed-tools: Task, Read, Glob, Grep, Edit, Write, Bash, TodoWrite, AskUserQuestion
+allowed-tools: Task, Read, Glob, Grep, Edit, Write, Bash, TodoWrite, AskUserQuestion, mcp__codex-cli__review_plan, mcp__codex-cli__review_code
 ---
 
 # Full Workflow
@@ -135,49 +135,13 @@ Track **REVIEW_ITERATION = 1**. Repeat until both Codex and Plan-Reviewer approv
 
 #### 2a. Codex Plan Review (mandatory)
 
-Run Codex in read-only sandbox to review the plan against the actual codebase:
+Run Codex in read-only sandbox to review the plan against the actual codebase.
 
-```bash
-codex exec --sandbox read-only -m gpt-5.3-codex \
-  -o tasks/<task-name>/codex-plan-review-REVIEW_ITERATION.md \
-  "<codex-prompt>"
-```
-
-**Codex prompt** (substitute actual content from `problem.md` and `plan.md`):
-
-```
-You are reviewing an implementation plan for production readiness. Your job is to find real problems — be thorough and critical.
-
-PROBLEM STATEMENT:
-<content of problem.md>
-
-IMPLEMENTATION PLAN:
-<content of plan.md>
-
-Read the plan above, then explore the actual codebase to verify the plan's assumptions. For each issue found, evaluate against these criteria:
-
-1. FEASIBILITY: Can this plan actually be implemented against the current codebase? Are file paths, function names, class structures, and APIs correct?
-2. MISSING STEPS: Are there steps the plan omits that are necessary for a working implementation? Missing migrations, config changes, import updates, dependency installs?
-3. WRONG ASSUMPTIONS: Does the plan assume things about the codebase that aren't true? Wrong file locations, non-existent functions, incorrect signatures?
-4. ORDERING: Are the steps in the right order? Will earlier steps break things that later steps depend on?
-5. EDGE CASES: Does the plan miss error handling, boundary conditions, or failure modes that the codebase already handles elsewhere?
-6. OVER-ENGINEERING: Does the plan introduce unnecessary complexity, abstractions, or indirection?
-7. BACKWARD COMPATIBILITY: Will the plan break existing callers, APIs, tests, or data formats?
-8. SECURITY: Does the plan introduce any security vulnerabilities?
-
-Format your response as a numbered list of findings. For each finding:
-- Which plan step it refers to
-- Severity: CRITICAL (blocks implementation) / HIGH (will cause bugs) / MEDIUM (should fix) / LOW (nice to have)
-- Category (from the list above)
-- Specific evidence from the codebase (file paths, line numbers, code snippets you found)
-- A concrete suggestion for how to fix the plan
-
-End your response with exactly one of:
-- **PLAN APPROVED** — if no CRITICAL or HIGH findings
-- **NEEDS REVISION** — if any CRITICAL or HIGH findings exist
-```
-
-**Bash timeout: 600000ms (10 min).** If it times out, retry once.
+Use the `review_plan` MCP tool with:
+- problem_statement: content of problem.md
+- plan_content: content of plan.md
+- output_file: "tasks/<task-name>/codex-plan-review-REVIEW_ITERATION.md"
+- working_directory: project root path
 
 #### 2b. Analyze Codex Findings
 
@@ -268,17 +232,13 @@ Track **REVIEW_ITERATION** (continue from Step 2's counter). Repeat until both C
 
 #### 5a. Codex Plan Review (mandatory)
 
-Same process as Step 2a — run Codex in read-only sandbox with the updated plan:
+Same process as Step 2a — run Codex in read-only sandbox with the updated plan.
 
-```bash
-codex exec --sandbox read-only -m gpt-5.3-codex \
-  -o tasks/<task-name>/codex-plan-review-REVIEW_ITERATION.md \
-  "<codex-prompt>"
-```
-
-Use the same Codex prompt template from Step 2a with current `problem.md` and `plan.md` content.
-
-**Bash timeout: 600000ms (10 min).** If it times out, retry once.
+Use the `review_plan` MCP tool with:
+- problem_statement: content of problem.md
+- plan_content: content of plan.md
+- output_file: "tasks/<task-name>/codex-plan-review-REVIEW_ITERATION.md"
+- working_directory: project root path
 
 #### 5b. Analyze Codex Findings
 
@@ -406,47 +366,13 @@ Save the diff for both reviewers to reference.
 
 ### 4b. Codex Code Review (mandatory)
 
-Run Codex `review` command against the uncommitted changes:
+Run Codex code review against the uncommitted changes.
 
-```bash
-codex review --uncommitted -m gpt-5.3-codex \
-  -o tasks/<task-name>/codex-code-review-CODE_REVIEW_ITERATION.md \
-  "<codex-review-prompt>"
-```
-
-**Codex review prompt** (substitute actual values):
-
-```
-Review these code changes for production readiness. Be thorough and critical.
-
-TASK CONTEXT:
-This code implements the plan described in tasks/<task-name>/plan.md for the problem in tasks/<task-name>/problem.md. Read both files for context.
-
-Review the changes against the ACTUAL CODEBASE for:
-
-1. SECURITY: SQL injection, XSS, command injection, auth bypass, secrets exposure, CSRF, insecure deserialization, SSRF, or any OWASP Top 10 vulnerability?
-2. BUGS: Logic errors, off-by-one, null/undefined handling, race conditions, deadlocks, resource leaks, incorrect error handling?
-3. BACKWARD COMPATIBILITY: Does this break existing API contracts, database schemas, message formats, or client expectations? Are migrations needed?
-4. ACCURACY: Does the code correctly implement the stated intent? Wrong function calls, incorrect parameters, misunderstandings of the codebase?
-5. OVER-ENGINEERING: Unnecessary abstractions, premature optimizations, feature flags, or complexity not justified by requirements?
-6. EDGE CASES: Unhandled error paths, boundary conditions, empty/null inputs, timeout scenarios, concurrent access?
-7. TESTING: Are changes adequately tested? Missing test cases for new behavior or edge cases?
-8. PERFORMANCE: N+1 queries, missing indexes, unbounded loops, memory leaks, expensive operations in hot paths?
-
-Format your response as a numbered list of findings. For each finding:
-- File and lines it refers to
-- Severity: CRITICAL (must fix before prod) / HIGH (should fix) / MEDIUM (recommended) / LOW (nice to have)
-- Category (from the list above)
-- Specific evidence from the codebase (file paths, line numbers, code snippets)
-- A concrete suggestion for how to fix it
-
-End with exactly one of:
-- **NO ISSUES FOUND** — if no findings at all
-- **APPROVED** — if no CRITICAL or HIGH findings
-- **NEEDS FIXES** — if any CRITICAL or HIGH findings exist
-```
-
-**Bash timeout: 600000ms (10 min).** If it times out, retry once.
+Use the `review_code` MCP tool with:
+- output_file: "tasks/<task-name>/codex-code-review-CODE_REVIEW_ITERATION.md"
+- task_context: "This code implements the plan described in tasks/<task-name>/plan.md for the problem in tasks/<task-name>/problem.md. Read both files for context."
+- uncommitted: true
+- working_directory: project root path
 
 ### 4c. Analyze Codex Code Review Findings
 

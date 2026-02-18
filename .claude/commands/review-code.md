@@ -1,7 +1,7 @@
 ---
 description: Review code for bugs, vulnerabilities, and performance issues using Codex + Code-Reviewer subagent (opus model)
 argument-hint: [task-name, file path, or 'staged']
-allowed-tools: Task, Read, Glob, Grep, Bash, Write, Edit, AskUserQuestion
+allowed-tools: Task, Read, Glob, Grep, Bash, Write, Edit, AskUserQuestion, mcp__codex-cli__review_code
 ---
 
 # Review Code
@@ -64,46 +64,14 @@ Save to `tasks/<task-name>/diff.patch`.
 
 ### Step 2: Codex Code Review (mandatory)
 
-Run Codex review against the changes:
+Run Codex review against the changes.
 
-```bash
-codex review --uncommitted -m gpt-5.3-codex \
-  -o tasks/<task-name>/codex-code-review-REVIEW_ITERATION.md \
-  "<codex-review-prompt>"
-```
+Use the `review_code` MCP tool with:
+- output_file: "tasks/<task-name>/codex-code-review-REVIEW_ITERATION.md"
+- uncommitted: true
+- working_directory: project root path
 
-**Note:** Use `--uncommitted` for unstaged/staged changes. If reviewing a specific branch, omit `--uncommitted` and use `--base <branch>` instead.
-
-**Codex review prompt:**
-
-```
-Review these code changes for production readiness. Be thorough and critical.
-
-Review the changes against the ACTUAL CODEBASE for:
-
-1. SECURITY: SQL injection, XSS, command injection, auth bypass, secrets exposure, CSRF, insecure deserialization, SSRF, or any OWASP Top 10 vulnerability?
-2. BUGS: Logic errors, off-by-one, null/undefined handling, race conditions, deadlocks, resource leaks, incorrect error handling?
-3. BACKWARD COMPATIBILITY: Does this break existing API contracts, database schemas, message formats, or client expectations? Are migrations needed?
-4. ACCURACY: Does the code correctly implement the stated intent? Wrong function calls, incorrect parameters, misunderstandings of the codebase?
-5. OVER-ENGINEERING: Unnecessary abstractions, premature optimizations, feature flags, or complexity not justified by requirements?
-6. EDGE CASES: Unhandled error paths, boundary conditions, empty/null inputs, timeout scenarios, concurrent access?
-7. TESTING: Are changes adequately tested? Missing test cases for new behavior or edge cases?
-8. PERFORMANCE: N+1 queries, missing indexes, unbounded loops, memory leaks, expensive operations in hot paths?
-
-Format your response as a numbered list of findings. For each finding:
-- File and lines it refers to
-- Severity: CRITICAL (must fix before prod) / HIGH (should fix) / MEDIUM (recommended) / LOW (nice to have)
-- Category (from the list above)
-- Specific evidence from the codebase (file paths, line numbers, code snippets)
-- A concrete suggestion for how to fix it
-
-End with exactly one of:
-- **NO ISSUES FOUND** — if no findings at all
-- **APPROVED** — if no CRITICAL or HIGH findings
-- **NEEDS FIXES** — if any CRITICAL or HIGH findings exist
-```
-
-**Bash timeout: 600000ms (10 min).** If it times out, retry once.
+**Note:** Use `uncommitted: true` for unstaged/staged changes. For reviewing a specific branch, use `base_branch: "<branch>"` instead.
 
 ### Step 3: Analyze Codex Findings
 
