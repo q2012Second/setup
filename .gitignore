@@ -17,6 +17,13 @@
 !.claude/agents/
 !.claude/agents/*.md
 
+# Codex MCP server source
+!codex_mcp/
+!codex_mcp/pyproject.toml
+!codex_mcp/codex_mcp/
+!codex_mcp/codex_mcp/__init__.py
+!codex_mcp/codex_mcp/server.py
+
 # Project-specific CLAUDE.md files (copied to avoid submodule issues)
 !projects/
 !projects/cost-module/
