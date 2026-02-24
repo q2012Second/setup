@@ -43,6 +43,14 @@ Codex explores the codebase in its sandbox. The Codex-Analyzer subagent triages 
    - Get diff: `git diff`
    - Output: `tasks/uncommitted-review/code-review.md`
 
+5. **If invoked during a workflow with an active worktree** (check `tasks/*/state.json` for `worktree_path`):
+   - Get diff: `git -C <worktree_path> diff`
+   - Output: `<TASK_DIR>/code-review.md` (absolute path)
+   - Codex `working_directory`: `<worktree_path>`
+   - Codex `task_context`: Pass inline content from TASK_DIR files (Codex sandbox cannot access TASK_DIR)
+   - Code-Reviewer `working_directory`: `<worktree_path>`
+   - Codex-Analyzer `working_directory`: `<worktree_path>`
+
 ## Setup
 ```bash
 mkdir -p tasks/<task-name>/
@@ -59,26 +67,28 @@ Get the appropriate diff based on input type (do NOT read files directly):
 - File path: `git diff <file>`
 - Staged: `git diff --cached`
 - Nothing: `git diff`
+- Worktree active: `git -C <worktree_path> diff`
 
-Save to `tasks/<task-name>/diff.patch`.
+Save to `tasks/<task-name>/diff.patch` (or `<TASK_DIR>/diff.patch` if worktree active).
 
 ### Step 2: Codex Code Review (mandatory)
 
 Run Codex review against the changes.
 
 Use the `review_code` MCP tool with:
-- output_file: "tasks/<task-name>/codex-code-review-REVIEW_ITERATION.md"
+- output_file: `<TASK_DIR>/codex-code-review-REVIEW_ITERATION.md` (absolute path if worktree active)
 - uncommitted: true
-- working_directory: project root path
+- working_directory: worktree path if available, otherwise project root path
 
 **Note:** Use `uncommitted: true` for unstaged/staged changes. For reviewing a specific branch, use `base_branch: "<branch>"` instead.
 
 ### Step 3: Analyze Codex Findings (via subagent)
 
 Spawn **Codex-Analyzer subagent** (Task tool, model=sonnet) with:
-- Codex review file path: `tasks/<task-name>/codex-code-review-REVIEW_ITERATION.md`
-- Analysis output path: `tasks/<task-name>/codex-code-analysis-REVIEW_ITERATION.md`
+- Codex review file path: `<TASK_DIR>/codex-code-review-REVIEW_ITERATION.md`
+- Analysis output path: `<TASK_DIR>/codex-code-analysis-REVIEW_ITERATION.md`
 - Review type: "code"
+- `working_directory`: worktree path if available, otherwise project root path
 
 Receive back: **Codex verdict** and **VALID findings only**.
 
@@ -92,6 +102,7 @@ Spawn **Code-Reviewer** agent (Task tool):
 - Pass in prompt:
   - Diff content
   - VALID Codex findings only (the summary returned by Codex-Analyzer, NOT the full analysis file)
+  - `working_directory`: worktree path if available, otherwise project root path
 
 ```
 Task tool parameters:
@@ -101,6 +112,9 @@ Task tool parameters:
     ## Changes to Review
     [Diff content from git diff]
 
+    ## Working Directory
+    <working_directory path>
+
     ## Codex Review Findings (VALID only)
     [VALID findings summary from Codex-Analyzer subagent response]
 
@@ -108,20 +122,20 @@ Task tool parameters:
     The Codex findings above have been pre-triaged (VALID only) — add any issues Codex missed.
 ```
 
-Write review to `tasks/<task-name>/code-review.md`.
+Write review to `<TASK_DIR>/code-review.md`.
 
 ### Step 5: Convergence Check
 
 - If both Codex verdict (from Step 3) and Code-Reviewer (Step 4) returned **NO ISSUES FOUND** or **APPROVED** (only Low-severity remain) → done
 - If either returned **NEEDS FIXES** (Critical, High, or Medium issues):
    a. Collect all VALID findings from both reviews
-   b. Fix issues (read only files being modified)
+   b. Fix issues (read only files being modified — use `<worktree_path>/...` if worktree active)
    c. Increment REVIEW_ITERATION
    d. Go back to Step 1 with fresh diff
 
 ## Output
 
-Save final review to `tasks/<task-name>/code-review.md`
+Save final review to `<TASK_DIR>/code-review.md`
 
 Present summary:
 ```
@@ -130,5 +144,5 @@ Code review complete after N iteration(s).
 - Code-Reviewer reviews: N
 - Issues found: X total (Y fixed, Z low-severity remaining)
 - Categories: [breakdown]
-- Full report: tasks/<task-name>/code-review.md
+- Full report: <TASK_DIR>/code-review.md
 ```

@@ -24,6 +24,14 @@ You are a validation specialist. Your job is to run tests, linters, and other va
 - **batch** - During implementation (validate recent changes)
 - **final** - End of implementation (full validation)
 
+## Working Directory
+
+You may receive a **working_directory** parameter. If provided, run ALL commands from that directory:
+```bash
+cd <working_directory> && <command>
+```
+If not provided, run from the current directory (backward compatible).
+
 ## Your Task
 
 ### Step 1: Detect Project Setup

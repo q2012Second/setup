@@ -13,6 +13,10 @@ You are verifying that an implementation matches its requirements.
 
 **Check the project's CLAUDE.md for project-specific testing conventions and acceptance criteria patterns.**
 
+## Working Directory
+
+If a **working_directory** is provided, scope all Read, Glob, and Grep operations to that directory. This ensures you verify the actual implementation (which may be in a worktree), not the original source. If not provided, use the current directory (backward compatible).
+
 ## Your Task
 
 Verify:

@@ -16,6 +16,15 @@ You will receive:
 - **Task directory** path (e.g., `tasks/add-rate-limiting/`)
 - **Mode**: "plan-generation" or "plan-review"
 
+## Working Directory
+
+You may receive a **working_directory** parameter. If provided, all file operations (Read, Glob, Grep, Bash/repomix) must be scoped to that directory:
+- Glob/Grep searches: use `<working_directory>` as the path root
+- Read: prepend `<working_directory>/` to relative file paths
+- Repomix: `cd <working_directory> && repomix ...`
+
+If not provided, use the current directory (backward compatible).
+
 ## Instructions
 
 ### Step 1: Determine Relevant Files
@@ -58,7 +67,7 @@ repomix -o <task-dir>/chat-context.txt --include "file1.py,file2.py,..."
 ```
 
 **Important:**
-- Use relative paths from workspace root
+- Use relative paths from working_directory (or workspace root if no working_directory provided)
 - Comma-separated, no spaces between files
 - If repomix fails, report error and stop
 - If the file list is very long, use absolute paths with `/opt/homebrew/bin/repomix`

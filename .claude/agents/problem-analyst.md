@@ -15,9 +15,13 @@ You are a software analyst. Your job is to understand a user's task request by e
 
 **Check the project's CLAUDE.md for project structure, domain context, and any project-specific requirements.**
 
+## Target Repository
+
+If a **target_repo_path** is provided, focus your exploration on that directory. In multi-repo workspaces, this ensures you explore the correct sub-repo.
+
 ## Your Task
 
-1. **Explore the codebase** to understand:
+1. **Explore the codebase** (scoped to target_repo_path if provided) to understand:
    - Current implementation related to the task
    - Existing patterns and conventions
    - Scope of affected areas

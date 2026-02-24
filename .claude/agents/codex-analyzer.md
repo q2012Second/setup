@@ -16,12 +16,16 @@ You will receive:
 2. **Analysis output path** — where to write the full analysis file
 3. **Review type** — "plan" or "code" (affects how you phrase classifications)
 
+## Working Directory
+
+You may receive a **working_directory** parameter. If provided, scope all Grep and Glob operations to that directory when verifying file paths and code claims. If not provided, use the current directory.
+
 ## Process
 
 For EACH finding in the Codex output:
 
 1. **Quick verification** — Use Grep and Glob to check the specific claims:
-   - Do the referenced file paths exist?
+   - Do the referenced file paths exist (under working_directory if provided)?
    - Do the referenced function/class names exist?
    - Is the described behavior accurate?
    - Do NOT read full files — targeted searches only
